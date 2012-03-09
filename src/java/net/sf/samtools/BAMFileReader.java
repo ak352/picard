@@ -25,6 +25,7 @@ package net.sf.samtools;
 
 
 import net.sf.samtools.util.*;
+import net.sf.samtools.util.pbgzf.ParallelBlockCompressedInputStream;
 import net.sf.samtools.SAMFileReader.ValidationStringency;
 
 import java.io.*;
@@ -44,7 +45,7 @@ class BAMFileReader extends SAMFileReader.ReaderImplementation {
     private BinaryCodec mStream = null;
 
     // Underlying compressed data stream.
-    private final BlockCompressedInputStream mCompressedInputStream;
+    private BlockCompressedInputStream mCompressedInputStream;
     private SAMFileHeader mFileHeader = null;
 
     // Populated if the file is seekable and an index exists
@@ -54,7 +55,7 @@ class BAMFileReader extends SAMFileReader.ReaderImplementation {
     private CloseableIterator<SAMRecord> mCurrentIterator = null;
 
     // If true, all SAMRecords are fully decoded as they are read.
-    private final boolean eagerDecode;
+    private boolean eagerDecode;
 
     // For error-checking.
     private ValidationStringency mValidationStringency;
@@ -78,6 +79,12 @@ class BAMFileReader extends SAMFileReader.ReaderImplementation {
     private SAMFileReader mFileReader = null;
 
     /**
+     * Use multiple threads
+     */
+    private boolean parallel = (Defaults.NUM_PBGZF_THREADS > 0) && !Defaults.DISABLE_PBGZF_DECOMPRESSION;
+
+
+    /**
      * Prepare to read BAM from a stream (not seekable)
      * @param stream source of bytes.
      * @param eagerDecode if true, decode all BAM fields as reading rather than lazily.
@@ -91,7 +98,8 @@ class BAMFileReader extends SAMFileReader.ReaderImplementation {
         throws IOException {
         mIndexFile = indexFile;
         mIsSeekable = false;
-        mCompressedInputStream = new BlockCompressedInputStream(stream);
+        if (parallel) mCompressedInputStream = new ParallelBlockCompressedInputStream(stream);
+        else mCompressedInputStream = new BlockCompressedInputStream(stream);
         mStream = new BinaryCodec(new DataInputStream(mCompressedInputStream));
         this.eagerDecode = eagerDecode;
         this.mValidationStringency = validationStringency;
@@ -111,7 +119,8 @@ class BAMFileReader extends SAMFileReader.ReaderImplementation {
                   final ValidationStringency validationStringency,
                   final SAMRecordFactory factory)
         throws IOException {
-        this(new BlockCompressedInputStream(file), indexFile!=null ? indexFile : findIndexFile(file), eagerDecode, file.getAbsolutePath(), validationStringency, factory);
+        if (parallel) init(new ParallelBlockCompressedInputStream(file), indexFile!=null ? indexFile : findIndexFile(file), eagerDecode, file.getAbsolutePath(), validationStringency, factory);
+        else init(new BlockCompressedInputStream(file), indexFile!=null ? indexFile : findIndexFile(file), eagerDecode, file.getAbsolutePath(), validationStringency, factory);
         if (mIndexFile != null && mIndexFile.lastModified() < file.lastModified()) {
             System.err.println("WARNING: BAM index file " + mIndexFile.getAbsolutePath() +
                     " is older than BAM " + file.getAbsolutePath());
@@ -126,10 +135,21 @@ class BAMFileReader extends SAMFileReader.ReaderImplementation {
                   final ValidationStringency validationStringency,
                   final SAMRecordFactory factory)
         throws IOException {
-        this(new BlockCompressedInputStream(strm), indexFile, eagerDecode, strm.getSource(), validationStringency, factory);
+        if (parallel) init(new ParallelBlockCompressedInputStream(strm), indexFile, eagerDecode, strm.getSource(), validationStringency, factory);
+        else init(new BlockCompressedInputStream(strm), indexFile, eagerDecode, strm.getSource(), validationStringency, factory);
     }
 
     private BAMFileReader(final BlockCompressedInputStream compressedInputStream,
+                          final File indexFile,
+                          final boolean eagerDecode,
+                          final String source,
+                          final ValidationStringency validationStringency,
+                          final SAMRecordFactory factory)
+        throws IOException {
+        init(compressedInputStream, indexFile, eagerDecode, source, validationStringency, factory);
+    }    
+    
+    private void init(final BlockCompressedInputStream compressedInputStream,
                           final File indexFile,
                           final boolean eagerDecode,
                           final String source,

@@ -45,15 +45,14 @@ import net.sf.samtools.FileTruncatedException;
  * c.f. http://samtools.sourceforge.net/SAM1.pdf for details of BGZF format
  */
 public class BlockCompressedInputStream extends InputStream {
-    private InputStream mStream = null;
-    private SeekableStream mFile = null;
+    protected InputStream mStream = null;
+    protected SeekableStream mFile = null;
     private byte[] mFileBuffer = null;
     private byte[] mCurrentBlock = null;
     private int mCurrentOffset = 0;
     private long mBlockAddress = 0;
     private int mLastBlockLength = 0;
     private final BlockGunzipper blockGunzipper = new BlockGunzipper();
-
 
     /**
      * Note that seek() is not supported if this ctor is used.

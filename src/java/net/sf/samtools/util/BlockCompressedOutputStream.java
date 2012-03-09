@@ -47,7 +47,7 @@ import java.util.zip.Deflater;
 public class BlockCompressedOutputStream
         extends OutputStream
 {
-    private static int defaultCompressionLevel = BlockCompressedStreamConstants.DEFAULT_COMPRESSION_LEVEL;
+    protected static int defaultCompressionLevel = BlockCompressedStreamConstants.DEFAULT_COMPRESSION_LEVEL;
 
     /**
      * Sets the GZip compression level for subsequent BlockCompressedOutputStream object creation
@@ -65,7 +65,7 @@ public class BlockCompressedOutputStream
         return defaultCompressionLevel;
     }
 
-    private final BinaryCodec codec;
+    protected final BinaryCodec codec;
     private final byte[] uncompressedBuffer = new byte[BlockCompressedStreamConstants.DEFAULT_UNCOMPRESSED_BLOCK_SIZE];
     private int numUncompressedBytes = 0;
     private final byte[] compressedBuffer =
@@ -90,7 +90,7 @@ public class BlockCompressedOutputStream
 
 
     // Really a local variable, but allocate once to reduce GC burden.
-    private final byte[] singleByteArray = new byte[1];
+    protected final byte[] singleByteArray = new byte[1];
 
     /**
      * Uses default compression level, which is 5 unless changed by setDefaultCompressionLevel
