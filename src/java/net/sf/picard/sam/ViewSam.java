@@ -66,6 +66,7 @@ public class ViewSam extends CommandLineProgram {
 
         final SAMFileWriter out = new SAMFileWriterFactory().makeSAMWriter(header, true, System.out);
         for (final SAMRecord rec : in) {
+            //System.err.println("ViewSam 2");
             if (System.out.checkError()) {
                 return 0;
             }
@@ -76,9 +77,11 @@ public class ViewSam extends CommandLineProgram {
             if (this.PF_STATUS == PfStatus.PF    && rec.getReadFailsVendorQualityCheckFlag()) continue;
             if (this.PF_STATUS == PfStatus.NonPF && !rec.getReadFailsVendorQualityCheckFlag()) continue;
 
+            //System.err.println("Adding rec: " + rec.toString());
             out.addAlignment(rec);
         }
         out.close();
+        in.close();
 
         return 0;
     }

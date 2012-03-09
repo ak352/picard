@@ -63,7 +63,7 @@ public class BlockCompressedFilePointerUtil {
      * @param blockOffset Offset into uncompressed block.
      * @return Virtual file pointer that embodies the input parameters.
      */
-    static long makeFilePointer(final long blockAddress, final int blockOffset) {
+    public static long makeFilePointer(final long blockAddress, final int blockOffset) {
         if (blockOffset < 0) {
             throw new IllegalArgumentException("Negative blockOffset " + blockOffset + " not allowed.");
         }

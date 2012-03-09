@@ -17,7 +17,7 @@ public abstract class AbstractAsyncWriter<T> {
     public static final int DEFAULT_QUEUE_SIZE = 2000;
 
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
-    private final BlockingQueue<T> queue;
+    protected final BlockingQueue<T> queue;
     private final Thread writer;
     private final WriterRunnable writerRunnable;
     private final AtomicReference<Throwable> ex = new AtomicReference<Throwable>(null);
@@ -66,6 +66,8 @@ public abstract class AbstractAsyncWriter<T> {
         }
         else {
             this.isClosed.set(true);
+            // wake up writer if sleeping and save 2 seconds in runtime
+            writer.interrupt();
 
             try { this.writer.join(); }
             catch (InterruptedException ie) { throw new RuntimeException("Interrupted waiting on writer thread.", ie); }
@@ -106,7 +108,7 @@ public abstract class AbstractAsyncWriter<T> {
                         if (item != null) synchronouslyWrite(item);
                     }
                     catch (InterruptedException ie) {
-                        /* Do Nothing */
+                        /* We are here because close() interrupted us */
                     }
                 }
             }

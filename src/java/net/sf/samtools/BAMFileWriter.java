@@ -25,6 +25,8 @@ package net.sf.samtools;
 
 import net.sf.samtools.util.BinaryCodec;
 import net.sf.samtools.util.BlockCompressedOutputStream;
+import net.sf.samtools.util.pbgzf.ParallelBlockCompressedOutputStream;
+import net.sf.samtools.util.pbgzf.DelayedFilePointer;
 
 import java.io.DataOutputStream;
 import java.io.File;
@@ -39,27 +41,38 @@ public class BAMFileWriter extends SAMFileWriterImpl {
     private BAMRecordCodec bamRecordCodec = null;
     private final BlockCompressedOutputStream blockCompressedOutputStream;
     private BAMIndexer bamIndexer = null;
+    private AsyncBAMIndexer asyncBamIndexer = null;
+    private boolean writingIndex = false;
+
+    /**
+     * Use multiple threads
+     */
+    private boolean parallel = (Defaults.NUM_PBGZF_THREADS > 0) && !Defaults.DISABLE_PBGZF_COMPRESSION;
 
     public BAMFileWriter(final File path) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(path);
+        if (parallel) blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(path);
+        else blockCompressedOutputStream = new BlockCompressedOutputStream(path);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(path.getAbsolutePath());
     }
 
     public BAMFileWriter(final File path, final int compressionLevel) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(path, compressionLevel);
+        if (parallel) blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(path, compressionLevel);
+        else blockCompressedOutputStream = new BlockCompressedOutputStream(path, compressionLevel);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(path.getAbsolutePath());
     }
 
     public BAMFileWriter(final OutputStream os, final File file) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(os, file);
+        if (parallel) blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(os, file);
+        else blockCompressedOutputStream = new BlockCompressedOutputStream(os, file);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(getPathString(file));
     }
 
     public BAMFileWriter(final OutputStream os, final File file, final int compressionLevel) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(os, file, compressionLevel);
+        if (parallel) blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(os, file, compressionLevel);
+        else blockCompressedOutputStream = new BlockCompressedOutputStream(os, file, compressionLevel);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(getPathString(file));
     }
@@ -85,10 +98,11 @@ public class BAMFileWriter extends SAMFileWriterImpl {
         if(getFilename() == null){
             throw new SAMException("Not creating BAM index since we don't have an output file name");
         }
-        bamIndexer = createBamIndex(getFilename());
+        setBamIndexer(outputBinaryCodec.getOutputFileName());
+        writingIndex = true;
     }
 
-    private BAMIndexer createBamIndex(String path) {
+    private void setBamIndexer(String path) {
         try {
             final String indexFileBase = path.endsWith(".bam") ?
                     path.substring(0, path.lastIndexOf(".")) : path;
@@ -98,7 +112,9 @@ public class BAMFileWriter extends SAMFileWriterImpl {
                     throw new SAMException("Not creating BAM index since unable to write index file " + indexFile);
                 }
             }
-            return new BAMIndexer(indexFile, getFileHeader());
+            BAMIndexer indexer = new BAMIndexer(indexFile, getFileHeader());
+            if (parallel) asyncBamIndexer = new AsyncBAMIndexer(indexer); //, (AsyncBlockCompressedOutputStream) blockCompressedOutputStream);
+            else bamIndexer = indexer;
         } catch (Exception e) {
             throw new SAMException("Not creating BAM index", e);
         }
@@ -107,16 +123,25 @@ public class BAMFileWriter extends SAMFileWriterImpl {
     protected void writeAlignment(final SAMRecord alignment) {
         prepareToWriteAlignments();
 
-        if (bamIndexer != null) {
+        if (writingIndex) {
             try {
-                final long startOffset = blockCompressedOutputStream.getFilePointer();
-                bamRecordCodec.encode(alignment);
-                final long stopOffset = blockCompressedOutputStream.getFilePointer();
-                // set the alignment's SourceInfo and then prepare its index information
-                alignment.setFileSource(new SAMFileSource(null, new BAMFileSpan(new Chunk(startOffset, stopOffset))));
-                bamIndexer.processAlignment(alignment);
+                if (parallel) {
+                    ParallelBlockCompressedOutputStream strm = (ParallelBlockCompressedOutputStream) blockCompressedOutputStream;
+                    DelayedFilePointer start = strm.getDelayedFilePointer();
+                    bamRecordCodec.encode(alignment);
+                    DelayedFilePointer end= strm.getDelayedFilePointer();
+                    asyncBamIndexer.processAlignment(alignment, start, end);
+                } else {
+                    final long startOffset = blockCompressedOutputStream.getFilePointer();
+                    bamRecordCodec.encode(alignment);
+                    final long stopOffset = blockCompressedOutputStream.getFilePointer();
+                    // set the alignment's SourceInfo and then prepare its index information
+                    alignment.setFileSource(new SAMFileSource(null, new BAMFileSpan(new Chunk(startOffset, stopOffset))));
+                    bamIndexer.processAlignment(alignment);
+                }
             } catch (Exception e) {
                 bamIndexer = null;
+                asyncBamIndexer = null;
                 throw new SAMException("Exception when processing alignment for BAM index " + alignment, e);
             }
         } else {
@@ -143,6 +168,11 @@ public class BAMFileWriter extends SAMFileWriterImpl {
             try {
                 if (bamIndexer != null) {
                     bamIndexer.finish();
+                    bamIndexer = null;
+                }
+                if (asyncBamIndexer != null) {
+                    asyncBamIndexer.finish();
+                    asyncBamIndexer = null;
                 }
             } catch (Exception e) {
                 throw new SAMException("Exception writing BAM index file", e);

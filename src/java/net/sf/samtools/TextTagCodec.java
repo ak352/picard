@@ -200,13 +200,13 @@ class TextTagCodec {
                 throw new SAMFormatException("Tag of type H should have valid hex string with even number of digits");
             }
         } else if (type.equals("B")) {
-            return covertStringArrayToObject(stringVal);
+            return convertStringArrayToObject(stringVal);
         } else {
             throw new SAMFormatException("Unrecognized tag type: " + type);
         }
     }
 
-    private Object covertStringArrayToObject(final String stringVal) {
+    private Object convertStringArrayToObject(final String stringVal) {
         final String[] elementTypeAndValue = new String[2];
         if (StringUtil.splitConcatenateExcessTokens(stringVal, elementTypeAndValue, ',') != 2) {
             throw new SAMFormatException("Tag of type B should have an element type followed by comma");
