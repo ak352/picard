@@ -138,8 +138,6 @@ public class BlockCompressedReader {
         block.setBlockAddress(this.mBlockAddress);
 
         this.mBlockAddress += block.blockLength;
-        //System.err.println("HERE 12 block.blockAddress=" + block.blockAddress);
-        //System.err.println("HERE 12 block.blockLength=" + block.blockLength);
         return true;
     }
 
