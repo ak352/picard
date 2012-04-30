@@ -48,7 +48,6 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
     private List<BlockCompressedPriorityBlockingQueue> input = null;
     private List<BlockCompressedPriorityBlockingQueue> output = null;
     private List<Integer> numOutstanding = null;
-    private LinkedList<Integer> reuseRegisterList = null;
 
     private List<BlockCompressedConsumer> consumers = null;
 
@@ -77,7 +76,6 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         this.input = new ArrayList<BlockCompressedPriorityBlockingQueue>();
         this.output = new ArrayList<BlockCompressedPriorityBlockingQueue>();
         this.numOutstanding = new ArrayList<Integer>();
-        this.reuseRegisterList = new LinkedList<Integer>();
 
         this.numConsumers = Defaults.NUM_PBGZF_THREADS;
         this.QUEUE_SIZE = Defaults.PBGZF_QUEUE_SIZE;
@@ -101,20 +99,12 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
     public int register() { // register with this queue
         int n = -1;
         this.lock.lock();
-        if(0 < this.reuseRegisterList.size()) { // re-use a slot
-            n = this.reuseRegisterList.poll(); // get the first element 
-            this.input.set(n, new BlockCompressedPriorityBlockingQueue(false));
-            this.output.set(n, new BlockCompressedPriorityBlockingQueue(true));
-            this.numOutstanding.set(n, new Integer(0));
-        }
-        else { // add a new slot
-            n = this.input.size();
-            this.input.add(new BlockCompressedPriorityBlockingQueue(false));
-            this.output.add(new BlockCompressedPriorityBlockingQueue(true));
-            this.numOutstanding.add(new Integer(0));
-        }
+        // add a new slot
+        n = this.input.size();
+        this.input.add(new BlockCompressedPriorityBlockingQueue(false));
+        this.output.add(new BlockCompressedPriorityBlockingQueue(true));
+        this.numOutstanding.add(new Integer(0));
         this.lock.unlock();
-        //System.err.println("Registered id=" + n);
         return n;
     }
 
@@ -140,18 +130,15 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
             // nullify
             this.input.set(i, null);
             this.output.set(i, null);
-            this.reuseRegisterList.add(i); // we could re-use later
             this.numOutstanding.set(i, -1);
         }
         this.lock.unlock();
-        //System.err.println("Deregistered id=" + i);
     }
 
     // consumers
     public BlockCompressed get(boolean wait) {
         int i, start;
         BlockCompressed block = null;
-        //System.err.println("in conumer get 0 [" + this.lastI + "]");
         start = i = this.lastI;
         while(true) { // while we have not received any
             if(0 < this.input.size()) { // do queues exist
@@ -164,9 +151,7 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
                 }
                 if(null != in) {
                     // get an item
-                    //System.err.println("in conumer get 1 [" + i + "] size=" + in.size());
                     block = in.poll(); 
-                    //System.err.println("in conumer get 2 [" + i + "] size=" + in.size());
                     // check success
                     if(null != block) {
                         break; // success!
@@ -183,7 +168,6 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
                 this.sleep();
             }
         }
-        //System.err.println("in conumer get 3 [" + i + "]");
         this.lastI = i;
         return block;
     }
@@ -198,10 +182,8 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
             out = null;
         }
         if(null != out) {
-            //System.err.println("in conumer add 1 [" + block.origin + "] size=" + out.size());
             if(wait) r = out.offer(block); // this will always return true
             else r = out.offer(block, 0, TimeUnit.MILLISECONDS); // do not wait
-            //System.err.println("in conumer add 2 [" + block.origin + "] size=" + out.size());
             if(r) { // update the number outstanding
                 this.lock.lock();
                 this.numOutstanding.set(block.origin, this.numOutstanding.get(block.origin)-1);
@@ -269,7 +251,6 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         // TODO: do these need to be synchronized?
         while(0 < n || 0 != in.size() || 0 != out.size()) {
             // TODO: use wait/notifyAll
-            //System.err.println("Waiting... [" + in.size() + "] [" + out.size() + "] [" + n + "]");
             this.sleep(l);
             // get the new # of outstanding
             this.lock.lock();

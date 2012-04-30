@@ -61,7 +61,7 @@ public class BlockCompressedPriorityBlockingQueue {
                 o.id = this.id;
                 this.id++;
             }
-            b = queue.add(o);
+            b = this.queue.add(o);
             this.newElement.signalAll(); // signal all
         }
         return b;
@@ -122,11 +122,15 @@ public class BlockCompressedPriorityBlockingQueue {
     {
         BlockCompressed block = null;
         while(true) {
+            // poll without a lock
             block = this.poll();
             if(null != block) break;
+            // wait for a new element to be added
             this.lock.lock();
             this.newElement.await(); // wait for a new object to be added
+            block = this.poll();
             this.lock.unlock();
+            if(null != block) break;
         }
         return block;
     }

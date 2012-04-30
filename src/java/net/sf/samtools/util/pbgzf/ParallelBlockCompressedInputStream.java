@@ -143,7 +143,6 @@ public class ParallelBlockCompressedInputStream extends BlockCompressedInputStre
             }
             else {
                 this.blockAddress = this.block.getBlockAddress();
-                //System.err.println("this.block.blockLength=" + this.block.blockLength + " this.block.blockOffset=" + this.block.blockOffset);
                 return (this.block.blockLength - this.block.blockOffset);
             }
         } catch(InterruptedException e) {

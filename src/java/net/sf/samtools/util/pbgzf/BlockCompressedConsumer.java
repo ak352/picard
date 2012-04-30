@@ -270,7 +270,7 @@ public class BlockCompressedConsumer {
                         }
 
                         // put back a block
-                        //System.err.println("Consumer #" + this.consumer.cid + " adding a block");
+                        //System.err.println("Consumer #" + this.consumer.cid + " adding a block with id: " + b.id);
                         if(!this.consumer.queue.add(b, true)) {
                             // ignore
                             //break; // EOF

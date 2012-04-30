@@ -104,4 +104,8 @@ public class BlockCompressed implements Comparable<BlockCompressed> {
         this.blockAddress = blockAddress;
         this.blockAddressLatch.countDown();
     }
+
+    public boolean equals(BlockCompressed o) {
+        return (0 == this.compareTo(o));
+    }
 }
