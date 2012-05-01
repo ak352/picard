@@ -24,6 +24,10 @@
 package net.sf.samtools.util.pbgzf;
 import net.sf.samtools.util.BlockCompressedFilePointerUtil;
 
+/**
+ * Encapsulates a virtual file pointer that waits until the associated block is written before 
+ * returning its result.
+ */
 public class DelayedFilePointer {
 	private BlockCompressed block = null;
 	private int offset = 0; // this needs to be set as the block.blockOffset could change...

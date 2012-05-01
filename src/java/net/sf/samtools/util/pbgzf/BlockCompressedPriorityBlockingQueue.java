@@ -34,18 +34,49 @@ import java.util.Collection;
 
 // TODO: enforce size...
 
-// NB: an ordered queue will not set the id of a block, and unordered queue will set the id of a block
+/**
+ * A blocking queue prioritized by block ID.  This is used by the multi-stream block queue
+ * for a single stream.
+ *
+ * If ordered, the queue preserves the order of the input blocks when returned.
+ */
 public class BlockCompressedPriorityBlockingQueue {
+    /**
+     * The underlying priority queue, prioritized by increasing block IDs.
+     */
     private PriorityBlockingQueue<BlockCompressed> queue = null;
+
+    /**
+     * The next id to return or set if this queue is ordered.
+     */
     private long id;
+
+    /**
+     * True if this queue is to maintain order, false otherwise.
+     */
     private boolean ordered = false;
+
+    /**
+     * A lock on the queue.
+     */
     final private Lock lock = new ReentrantLock();
+
+    /**
+     * A condition to signal a new element has been added to the queue.
+     */
     final private Condition newElement = lock.newCondition();
 
+    /**
+     * Creates an unordered queue.
+     */
     public BlockCompressedPriorityBlockingQueue() {
         this(false);
     }
 
+    /**
+     * Creates a queue based on the given ordering.
+     * @param ordered true if the queue is to be ordered, false otherwise.
+     */
     public BlockCompressedPriorityBlockingQueue(boolean ordered)
     {
         this.queue = new PriorityBlockingQueue<BlockCompressed>();
@@ -53,7 +84,12 @@ public class BlockCompressedPriorityBlockingQueue {
         this.ordered = ordered;
     }
 
-    // non-blocking
+    /**
+     * Adds a block to the queue, waiting if necessary.  If the queue is ordered,
+     * the id of the block is set.
+     * @param o the block to add.
+     * @return true if successful, false otherwise.
+     */
     public boolean add(BlockCompressed o) {
         boolean b = false;
         synchronized (this) {
@@ -67,7 +103,12 @@ public class BlockCompressedPriorityBlockingQueue {
         return b;
     }
 
-    // non-blocking
+    /**
+     * Adds a block to the queue, waiting if necessary.  If the queue is ordered,
+     * the id of the block is set.
+     * @param o the block to add.
+     * @return true if successful, false otherwise.
+     */
     public boolean offer(BlockCompressed o) {
         boolean b = false;
         this.lock.lock();
@@ -81,7 +122,14 @@ public class BlockCompressedPriorityBlockingQueue {
         return b;
     }
 
-    // non-blocking
+    /**
+     * Adds a block to the queue, waiting if necessary.  If the queue is ordered,
+     * the id of the block is set.
+     * @param o the block to add.
+     * @param timeout the length of time to wait.
+     * @param unit the unit of time to wait.
+     * @return true if successful, false otherwise.
+     */
     public boolean offer(BlockCompressed o, long timeout, TimeUnit unit) {
         boolean b = false;
         this.lock.lock();
@@ -95,7 +143,11 @@ public class BlockCompressedPriorityBlockingQueue {
         return b;
     }
 
-    // non-blocking
+    /**
+     * Retrieves and removes the head of this queue, or null if this queue is empty. This 
+     * will block to preserve ordering.
+     * @return the head of the queue.
+     */
     public BlockCompressed poll() {
         BlockCompressed block = null;
         if(!this.ordered) { // unordered
@@ -115,7 +167,10 @@ public class BlockCompressedPriorityBlockingQueue {
         return block;
     }
 
-    // blocking
+    /**
+     * Retrieves and removes the head of this queue, waiting if no elements are present on this queue.
+     * @return the head of the queue.
+     */
     public BlockCompressed take() 
         // TODO
         throws InterruptedException
@@ -135,12 +190,36 @@ public class BlockCompressedPriorityBlockingQueue {
         return block;
     }
 
-    // non-blocking
+    /**
+     * Gets a collection of blocks from the queue, waiting if specified. This is only
+     * implemented for unordered queues.
+     * @param c the collection in which to add the blocks.
+     * @param maxElements the maximum number of elements to add.
+     * @return the number of blocks added.
+     */
+    public int drainTo(Collection<BlockCompressed> c, int maxElements) 
+        throws Exception
+    {
+        BlockCompressed block = null;
+        if(!this.ordered) { // unordered
+            return this.queue.drainTo(c, maxElements);
+        }
+        else {
+            throw new Exception("Not implemented");
+        }
+    }
+
+    /**
+     * Clears this queue.
+     */
     public void clear() {
         this.queue.clear();
     }
 
-    // non-blocking
+    /**
+     * Returns the number of elements in this collection.
+     * @return the size.
+     */
     public int size() {
         return this.queue.size();
     }
