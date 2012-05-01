@@ -280,7 +280,7 @@ public class BlockCompressedInputStream extends InputStream {
         mCurrentOffset = uncompressedOffset;
     }
 
-    private boolean eof() throws IOException {
+    protected boolean eof() throws IOException {
         if (mFile.eof()) {
             return true;
         }

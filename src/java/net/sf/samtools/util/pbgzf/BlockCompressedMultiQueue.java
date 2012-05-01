@@ -44,11 +44,11 @@ import net.sf.samtools.Defaults;
  * This queue guarantees that the order in which blocks are added is the same order in which blocks are
  * returned.  The queue also blocks when specified.
  */
-public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, BlockCompressedConsumerQueue {
+public class BlockCompressedMultiQueue {
     /**
      * The default queue size for each stream's queue.
      */
-    private int QUEUE_SIZE = 100;
+    private int default_queue_size = 100;
 
     /**
      * The default number of milliseconds to sleep.
@@ -61,19 +61,9 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
     private static BlockCompressedMultiQueue instance = null;
 
     /**
-     * The input queues to the consumers, one per registered stream.
+     * The queues for the consumers, one per registered stream.
      */
-    private List<BlockCompressedPriorityBlockingQueue> input = null;
-    
-    /**
-     * The output queues from the consumers, one per registered stream.
-     */
-    private List<BlockCompressedPriorityBlockingQueue> output = null;
-
-    /**
-     * The number of out-standing blocks possessed by the consumers.
-     */
-    private List<Integer> numOutstanding = null;
+    private List<BlockCompressedQueue> queues = null;
 
     /**
      * The consumer threads for compressing and decompressing blocks.
@@ -84,7 +74,7 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
      * The lock on this queue.
      */
     final private Lock lock = new ReentrantLock();
-
+    
     /**
      * The number of consumers.
      */
@@ -94,7 +84,7 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
      * The index of the last registered stream to yield blocks to a consumer.
      */
     private int lastI = 0;
-    
+
     /**
      * Sleep.
      */
@@ -102,7 +92,7 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
     {
         this.sleep(THREAD_SLEEP);
     }
-    
+
     /**
      * Sleep for the given length of time.
      * @param l the length of time.
@@ -121,12 +111,9 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
      */
     protected BlockCompressedMultiQueue() {
         int i;
-        this.input = new ArrayList<BlockCompressedPriorityBlockingQueue>();
-        this.output = new ArrayList<BlockCompressedPriorityBlockingQueue>();
-        this.numOutstanding = new ArrayList<Integer>();
-
+        this.queues = new LinkedList<BlockCompressedQueue>();
         this.numConsumers = Defaults.NUM_PBGZF_THREADS;
-        this.QUEUE_SIZE = Defaults.PBGZF_QUEUE_SIZE;
+        this.default_queue_size = Defaults.PBGZF_QUEUE_SIZE;
         this.consumers = new ArrayList<BlockCompressedConsumer>();
         for(i=0;i<this.numConsumers;i++) {
             this.consumers.add(new BlockCompressedConsumer(this, i));
@@ -147,85 +134,80 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         return instance;
     }
 
-	/**
-	 * Gets the ID of the stream relative to the queue.
-	 * @return the id of this stream in the queue.
-	 */
-    public int register() { // register with this queue
-        int n = -1;
-        this.lock.lock();
+    /**
+     * Gets the ID of the stream relative to the queue.
+     * @return the queue to associate with this stream.
+     */
+    public BlockCompressedQueue register() { // register with this queue
+        BlockCompressedQueue queue = null;
+
+        queue = new BlockCompressedQueue(this.default_queue_size);
+        
         // add a new slot
-        n = this.input.size();
-        this.input.add(new BlockCompressedPriorityBlockingQueue(false));
-        this.output.add(new BlockCompressedPriorityBlockingQueue(true));
-        this.numOutstanding.add(new Integer(0));
+        this.lock.lock();
+        this.queues.add(queue);
         this.lock.unlock();
-        return n;
+
+        return queue;
     }
 
-	/**
-	 * Disassociates this stream with the queue.
-	 * @param i the id of this stream returned by register.
-	 */
-    public void deregister(int i) {
+    /**
+     * Disassociates this stream with the queue and closes the underlying queue.
+     * @param i the id of this stream returned by register.
+     * @param true if successful, false otherwise.
+     */
+    public boolean deregister(BlockCompressedQueue queue) 
+    {
         // get the associated queues
         this.lock.lock();
-        BlockCompressedPriorityBlockingQueue in = this.input.get(i);
-        BlockCompressedPriorityBlockingQueue out = this.output.get(i);
-        if(null != in && null != out) {
-            // clear the queues
-            in.clear(); 
-            out.clear();
-            // wait for all outstanding blocks to be returned
-            while(0 < this.numOutstanding.get(i)) {
-                // TODO: use wait/notifyAll
-                this.lock.unlock();
-                this.sleep();
-                this.lock.lock();
-            }
-            // clear the queues
-            in.clear(); 
-            out.clear();
-            // nullify
-            this.input.set(i, null);
-            this.output.set(i, null);
-            this.numOutstanding.set(i, -1);
+        try {
+            // close the queue
+            queue.close();
+
+            // remove the queue
+            return this.queues.remove(queue);
+        } catch (InterruptedException e) {
+            return false;
+        } finally {
+            this.lock.unlock();
         }
-        this.lock.unlock();
     }
 
     /**
      * Gets a block from the queue, waiting if specified.
-     * @param wait true to wait until a block is available, false otherwise.
      * @return null if unsuccesful, otherwise a block.
      */
-    public BlockCompressed get(boolean wait) {
+    public BlockCompressed get() {
         int i, start;
         BlockCompressed block = null;
         start = i = this.lastI;
         while(true) { // while we have not received any
-            if(0 < this.input.size()) { // do queues exist
-                BlockCompressedPriorityBlockingQueue in = null;
-                // get the input queue
+            if(0 < this.queues.size()) { // do queues exist?
+                BlockCompressedQueue queue = null;
+                    
+                // NB: how else can we detect if the "queues" were modified?
+                // We would need a lock!
                 try {
-                    in = this.input.get(i);
-                } catch(IndexOutOfBoundsException e) {
-                    // ignore
-                }
-                if(null != in) {
+                    queue = this.queues.get(i);
+
                     // get an item
-                    block = in.poll(); 
+                    block = queue.getInput(false); // do not wait
+
                     // check success
                     if(null != block) {
                         break; // success!
                     }
+                } catch(IndexOutOfBoundsException e) {
+                    // ignore
+                } catch(InterruptedException e) {
+                    // ignore
                 }
+
                 // move to the next queue
                 i++;
-                if(this.input.size() <= i) i = 0;
+                if(this.queues.size() <= i) i = 0;
             }
             if(start == i) { // we gone through all of the queues
-                if(!wait) break; // do not wait
                 // give a chance for others to add
                 // TODO: use wait/notifyAll
                 this.sleep();
@@ -233,163 +215,5 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         }
         this.lastI = i;
         return block;
-    }
-
-    /**
-     * Gets a collection of blocks from the queue, waiting if specified.
-     * @param c the collection in which to add the blocks.
-     * @param maxElements the maximum number of elements to add.
-     * @param wait true to wait until a block is available, false otherwise.
-     * @return the number of blocks added.
-     */
-    public int drainTo(Collection<BlockCompressed> c, int maxElements, boolean wait)
-    {
-        int i, start, num = 0;
-        start = i = this.lastI;
-        while(true) { // while we have not received any
-            if(0 < this.input.size()) { // do queues exist
-                BlockCompressedPriorityBlockingQueue in = null;
-                // get the input queue
-                try {
-                    in = this.input.get(i);
-                } catch(IndexOutOfBoundsException e) {
-                    // ignore
-                }
-                if(null != in) {
-                    // get items
-                    num = in.drainTo(c, maxElements);
-                    // check success
-                    if(0 < num) {
-                        break; // success!
-                    }
-                }
-                // move to the next queue
-                i++;
-                if(this.input.size() <= i) i = 0;
-            }
-            if(start == i) { // we gone through all of the queues
-                if(!wait) break; // do not wait
-                // give a chance for others to add
-                // TODO: use wait/notifyAll
-                this.sleep();
-            }
-        }
-        this.lastI = i;
-        return num;
-    }
-
-    /**
-     * Adds a block to the queue, waiting if specified.
-     * @param wait true to wait until the block can be added, false otherwise.
-     * @return true if successful, false otherwise.
-     */
-    public boolean add(BlockCompressed block, boolean wait) {
-        boolean r = false;
-        BlockCompressedPriorityBlockingQueue out = null;
-        try {
-            out = this.output.get(block.origin);
-        } catch(IndexOutOfBoundsException e) {
-            out = null;
-        }
-        if(null != out) {
-            if(wait) r = out.offer(block); // this will always return true
-            else r = out.offer(block, 0, TimeUnit.MILLISECONDS); // do not wait
-            if(r) { // update the number outstanding
-                this.lock.lock();
-                this.numOutstanding.set(block.origin, this.numOutstanding.get(block.origin)-1);
-                this.lock.unlock();
-            }
-        }
-        return r;
-    }
-
-	/**
-	 * Adds a block of data to the queue for compression/decompression. The
-	 * ID of the block will be set here.
-	 * @param block the block to add.
-	 * @return true if successful, false otherwise.
-	 */
-    public boolean add(BlockCompressed block) 
-        throws InterruptedException
-    {
-        BlockCompressedPriorityBlockingQueue in = null;
-        // lock
-        //this.lock.lock();
-        // get the queue
-        try {
-            in = this.input.get(block.origin);
-        } catch(IndexOutOfBoundsException e) {
-            in = null;
-        }
-        // unlock
-        //this.lock.unlock();
-        // add the block
-        if(null != in) {
-            return in.offer(block);
-        }
-        return false;
-    }
-
-	/**
-	 * Returns the next block from the queue, in the same order it was added.
-	 * @param i the id of this stream.
-	 * @return the block.
-	 */
-    public BlockCompressed get(int i) 
-        throws InterruptedException
-    {
-        BlockCompressedPriorityBlockingQueue out = null;
-        // get the queue
-        //this.lock.lock();
-        try {
-            out = this.output.get(i);
-        } catch(IndexOutOfBoundsException e) {
-            out = null;
-        }
-        //this.lock.unlock();
-        // get the block
-        if(null != out) {
-            return out.take();
-        }
-        return null;
-    }
-
-	/**
-	 * Waits until the queue for this stream is empty.
-	 * @param i the id of this stream.
-	 * @param l the length of time to sleep if the queue is not empty.
-	 */
-    public void waitUntilEmpty(int i, int l) 
-        throws InterruptedException
-    {
-        BlockCompressedPriorityBlockingQueue in = null;
-        BlockCompressedPriorityBlockingQueue out = null;
-        int n = 0;
-        // get the queues
-        this.lock.lock();
-        in = this.input.get(i);
-        out = this.output.get(i);
-        n = this.numOutstanding.get(i);
-        this.lock.unlock();
-        // wait until both are empty
-        // TODO: do these need to be synchronized?
-        while(0 < n || 0 != in.size() || 0 != out.size()) {
-            // TODO: use wait/notifyAll
-            this.sleep(l);
-            // get the new # of outstanding
-            this.lock.lock();
-            n = this.numOutstanding.get(i);
-            this.lock.unlock();
-        }
-    }
-    
-	/**
-	 * Waits until the queue for this stream is empty.
-	 * @param i the id of this stream.
-	 */
-    public void waitUntilEmpty(int i) 
-        throws InterruptedException
-    {
-        waitUntilEmpty(i, 100); //sleep for 100 ms
     }
 }

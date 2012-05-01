@@ -39,7 +39,7 @@ public class BlockCompressedConsumer {
     /**
      * The queue from which to retrieve and put blocks.
      */
-    private BlockCompressedConsumerQueue queue = null;
+    private BlockCompressedMultiQueue queue = null;
 
     /**
      * The underlying thread to process the blocks.
@@ -72,11 +72,6 @@ public class BlockCompressedConsumer {
     private long n;
 
     /**
-     * True to locally buffer blocks into a pool, false otherwise.
-     */
-    private boolean usePools = false;
-
-    /**
      * A deflator with no compresion.
      */
     private final Deflater noCompressionDeflater = new Deflater(Deflater.NO_COMPRESSION, true);
@@ -101,7 +96,7 @@ public class BlockCompressedConsumer {
      * @param queue the queue from which to retrieve and add blocks.
      * @param cid the consumer id.
      */
-    public BlockCompressedConsumer(BlockCompressedConsumerQueue queue, int cid)
+    public BlockCompressedConsumer(BlockCompressedMultiQueue queue, int cid)
     {
         int i;
         this.queue = queue;
@@ -266,97 +261,39 @@ public class BlockCompressedConsumer {
         public void run()
         {
             BlockCompressed b = null;
-            BlockCompressedPool poolIn = null;
-            BlockCompressedPool poolOut = null;
             boolean wait;
 
             try {
 
                 this.consumer.n = 0;
-                poolIn = new BlockCompressedPool(false);
-                poolOut = new BlockCompressedPool(false);
 
                 while(!this.consumer.isDone) {
-                    if(usePools) {
-                        // get block(s)
-                        while(poolIn.n < poolIn.m) { // more to read in
-                            if(0 < this.consumer.queue.drainTo(poolIn, poolIn.m - poolIn.n, (0 == poolIn.n && 0 == poolOut.n))) {
-                                break;
-                            }
-                        }
-                        if(0 == poolIn.n && 0 == poolOut.n) { // no more data
-                            //break; // EOF
-                            Thread.currentThread().sleep(THREAD_SLEEP);//sleep for 10 ms
-                        }
+                    // get block
+                    //System.err.println("Consumer #" + this.consumer.cid + " getting block");
+                    b = this.consumer.queue.get();
+                    if(null == b) {
+                        //break;
+                        Thread.currentThread().sleep(THREAD_SLEEP);//sleep for 10 ms
+                    }
 
-                        // inflate/deflate
-                        while(0 < poolIn.n && poolOut.n < poolIn.m) { // consume while the in has more and the out has room
-                            b = poolIn.peek();
-                            if(null == b) {
-                                throw new Exception("Bug encountered");
-                            }
-                            if(b.compress) {
-                                if(!deflateBlock(b, this.consumer.deflaters.get(b.compressLevel+1))) {
-                                    throw new Exception("Bug encountered");
-                                }
-                            }
-                            else {
-                                if(!inflateBlock(b)) {
-                                    throw new Exception("Bug encountered");
-                                }
-                            }
-                            if(!poolOut.add(b)) {
-                                throw new Exception("Bug encountered");
-                            }
-                            poolIn.get(); // ignore return
-                            b = null;
-                        }
-
-                        // put back a block
-                        while(0 < poolOut.n) {
-                            b = poolOut.peek();
-                            // NB: only wait if the pools are full
-                            wait = (poolIn.m == poolIn.n && poolOut.m == poolOut.n) ? true : false;
-                            if(!this.consumer.queue.add(b, wait)) {
-                                break; 
-                            }
-                            poolOut.get(); // ignore return
-                            b = null;
-                            this.consumer.n++;
+                    // inflate/deflate
+                    if(b.compress) {
+                        //System.err.println("Consumer #" + this.consumer.cid + " deflate");
+                        if(!deflateBlock(b, this.consumer.deflaters.get(b.compressLevel+1))) {
+                            throw new Exception("Bug encountered");
                         }
                     }
                     else {
-                        // get block
-                        //System.err.println("Consumer #" + this.consumer.cid + " getting block");
-                        b = this.consumer.queue.get(true);
-                        if(null == b) {
-                            //break;
-                            Thread.currentThread().sleep(THREAD_SLEEP);//sleep for 10 ms
+                        //System.err.println("Consumer #" + this.consumer.cid + " inflate");
+                        if(!inflateBlock(b)) {
+                            throw new Exception("Bug encountered");
                         }
-
-                        // inflate/deflate
-                        if(b.compress) {
-                            //System.err.println("Consumer #" + this.consumer.cid + " deflate");
-                            if(!deflateBlock(b, this.consumer.deflaters.get(b.compressLevel+1))) {
-                                throw new Exception("Bug encountered");
-                            }
-                        }
-                        else {
-                            //System.err.println("Consumer #" + this.consumer.cid + " inflate");
-                            if(!inflateBlock(b)) {
-                                throw new Exception("Bug encountered");
-                            }
-                        }
-
-                        // put back a block
-                        //System.err.println("Consumer #" + this.consumer.cid + " adding a block with id: " + b.id);
-                        if(!this.consumer.queue.add(b, true)) {
-                            // ignore
-                            //break; // EOF
-                        }
-                        b = null;
-                        this.consumer.n++;
                     }
+
+                    // set consumed
+                    b.setConsumed();
+                    b = null;
+                    this.consumer.n++;
                 }
                 //System.err.println("Consumer Done #" + this.consumer.cid + " n=" + this.consumer.n);
 

@@ -42,11 +42,6 @@ public class BlockCompressedWriter {
     private BlockCompressedWriterThread writerThread = null;
 
     /**
-     * The id of the output stream used to identify blocks in the queue.
-     */
-    private int id;
-
-    /**
      * The codec used to write the data.
      */
     private final BinaryCodec codec;
@@ -64,7 +59,7 @@ public class BlockCompressedWriter {
     /**
      * The otuput queue from which to get the blocks to write.
      */
-    public BlockCompressedBlockingQueue output = null;
+    public BlockCompressedQueue queue= null;
     
     /**
      * True if the writer has written all blocks, false otherwise.
@@ -77,11 +72,6 @@ public class BlockCompressedWriter {
     public boolean isClosed = false;
 
     /**
-     * The local pool of blocks to write.
-     */
-    public BlockCompressedPool pool = null;
-            
-    /**
      * The number of blocks written.
      */
     private long n = 0;
@@ -89,13 +79,11 @@ public class BlockCompressedWriter {
     /**
      * Creates a new writer.
      * @param codec the codec to which to write.
-     * @param output the queue from which to retrieve blocks.
-     * @param id the ID associated with the output stream.
+     * @param queue the queue from which to retrieve blocks.
      */
-    public BlockCompressedWriter(BinaryCodec codec, BlockCompressedBlockingQueue output, int id) {
+    public BlockCompressedWriter(BinaryCodec codec, BlockCompressedQueue queue) {
         this.codec = codec;
-        this.output = output;
-        this.id = id;
+        this.queue = queue;
     }
 
     /**
@@ -190,17 +178,14 @@ public class BlockCompressedWriter {
         {
             BlockCompressed b = null;
             boolean wait = true;
-            long prevId = -1;
 
             try {
                 //System.err.println("Writer: starting");
                 while(!this.writer.isDone) {
-                    // TODO: use the local pool
-
                     // get a block
                     //System.err.println("Writer: getting a block from the output");
                     getting = true;
-                    b = this.writer.output.get(this.writer.id);
+                    b = this.writer.queue.getOutput(false);
                     if(this.isInterrupted()) {
                         //System.err.println("Writer: was interrupted");
                         break;
@@ -212,10 +197,8 @@ public class BlockCompressedWriter {
                     getting = false;
                     //System.err.println("Writer: got a block from the output id=" + b.id);
 
-                    if(b.id != prevId + 1) {
-                        throw new Exception("blocks retrieved out of order! previous:" + prevId + " current:" + b.id);
-                    }
-                    prevId = b.id;
+                    // Wait for the block to be consumed
+                    b.getConsumed();
 
                     // write the block
                     //System.err.println("Writer: writing block id=" + b.id + " b.blockLength=" + b.blockLength + " b.priorLength=" + b.priorLength);
@@ -247,11 +230,11 @@ public class BlockCompressedWriter {
 
     /**
      * Resets the writer.
-     * @param id the id of the associated stream registered with the queue.
+     * @param queue the new queue.
      */
-    public void reset(int id) {
+    public void reset(BlockCompressedQueue queue) {
         this.isDone = this.isClosed = false;
-        this.id = id;
+        this.queue = queue;
     }
 
     /**
@@ -261,8 +244,7 @@ public class BlockCompressedWriter {
         this.flush();
         this.codec.writeBytes(BlockCompressedStreamConstants.EMPTY_GZIP_BLOCK); // write the last empty gzip block
         this.codec.close(); // close the output codec
-        this.output = null;
-        this.pool = null;
+        this.queue = null;
     }
 
     /**

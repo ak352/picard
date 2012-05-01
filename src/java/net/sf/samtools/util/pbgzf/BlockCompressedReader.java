@@ -66,7 +66,7 @@ public class BlockCompressedReader {
     /**
      * The queue in which to place blocks.
      */
-    public BlockCompressedBlockingQueue input = null;
+    public BlockCompressedQueue queue = null;
 
     /**
      * True if the reader has read in all blocks, false otherwise.
@@ -79,22 +79,15 @@ public class BlockCompressedReader {
     public boolean isClosed = false;
 
     /**
-     * The id of the input stream used to identify blocks in the queue.
-     */
-    private int id;
-
-    /**
      * Creates a new reader.
      * @param stream the underlying input stream.
      * @param file the file.
-     * @param input the input queue.
-     * @param id ID of the associated stream registered with the queue.
+     * @param queue the input queue.
      */
-    public BlockCompressedReader(final InputStream stream, final SeekableStream file, BlockCompressedBlockingQueue input, int id) {
+    public BlockCompressedReader(final InputStream stream, final SeekableStream file, BlockCompressedQueue queue) {
         this.mStream = stream;
         this.mFile = file;
-        this.input = input;
-        this.id = id;
+        this.queue = queue;
     }
 
     private int readBytes(final byte[] buffer, final int offset, final int length)
@@ -200,11 +193,11 @@ public class BlockCompressedReader {
 
     /**
      * Resets the state of the reader.
-     * @param id the id of the associated stream registered with the queue.
+     * @param queue the new input queue.
      */
-    public void reset(int id) {
+    public void reset(BlockCompressedQueue queue) {
         this.isDone = this.isClosed = false;
-        this.id = id;
+        this.queue = queue;
     }
 
     /**
@@ -226,7 +219,7 @@ public class BlockCompressedReader {
             mStream.close();
             mStream = null;
         }
-        this.input = null;
+        this.queue = null;
     }
 
     /**
@@ -282,7 +275,7 @@ public class BlockCompressedReader {
 
                     // read a block
                     //System.err.println("Reader: reading");
-                    b = new BlockCompressed(this.reader.id);
+                    b = new BlockCompressed();
                     if(!this.reader.readBlock(b)) {
                         throw new Exception("BlockCompressedReader: could not read a block");
                     }
@@ -293,7 +286,7 @@ public class BlockCompressedReader {
 
                     // add it to the queue
                     //System.err.println("Reader: adding");
-                    if(!this.reader.input.add(b)) {
+                    if(!this.reader.queue.add(b)) {
                         break;
                     }
                     //System.err.println("Reader: looping");

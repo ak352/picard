@@ -56,22 +56,22 @@ import net.sf.samtools.FileTruncatedException;
 public class ParallelBlockCompressedInputStream extends BlockCompressedInputStream {
 
     private BlockCompressedReader reader = null;
-    private BlockCompressedBlockingQueue queue = null;
+    private BlockCompressedMultiQueue multiQueue = null;
+    private BlockCompressedQueue blockQueue = null;
     private BlockCompressed block = null;
     private boolean eof = false;
     private int blockOffset = 0;
     private long blockAddress = 0;
-    private int id;
 
     private void init() {
         int i;
         //System.err.println("INIT 1 ParallelBlockCompressedInputStream");
         // create the queues
-        this.queue = BlockCompressedMultiQueue.getInstance();
+        this.multiQueue = BlockCompressedMultiQueue.getInstance();
         // register
-        this.id = this.queue.register();
+        this.blockQueue = this.multiQueue.register();
         // create the reader
-        this.reader = new BlockCompressedReader(mStream, mFile, this.queue, this.id);
+        this.reader = new BlockCompressedReader(mStream, mFile, this.blockQueue);
         // start the reader and consumers
         this.reader.start();
         //System.err.println("INIT 2 ParallelBlockCompressedInputStream");
@@ -134,7 +134,7 @@ public class ParallelBlockCompressedInputStream extends BlockCompressedInputStre
                 if(null != this.block) { // destroy this block
                     this.block = null;
                 }
-                this.block = this.queue.get(this.id);
+                this.block = this.blockQueue.getOutput();
             }
             if(null == this.block) { // no block
                 this.blockOffset = 0;
@@ -161,7 +161,7 @@ public class ParallelBlockCompressedInputStream extends BlockCompressedInputStre
         this.reader.setDone();
 
         // close the queue
-        this.queue.deregister(this.id);
+        this.multiQueue.deregister(this.blockQueue);
 
         // join
         this.reader.join();
@@ -315,7 +315,7 @@ public class ParallelBlockCompressedInputStream extends BlockCompressedInputStre
             }
 
             // close the queue
-            this.queue.deregister(this.id);
+            this.multiQueue.deregister(this.blockQueue);
 
             // the reader is done
             this.reader.setDone();
@@ -341,32 +341,39 @@ public class ParallelBlockCompressedInputStream extends BlockCompressedInputStre
                 mFile.seek(blockAddress);
                 // TODO: error checking for this seek
             }
+            
+            if (super.eof()) { // check to see if mFile is at EOF
+                this.block = null;
+            }
+            else {
+                // re-register
+                this.blockQueue = this.multiQueue.register();
 
-            // re-register
-            this.id = this.queue.register();
+                // reset
+                this.reader.reset(this.blockQueue);
 
-            // reset
-            this.reader.reset(this.id);
+                // restart the reader
+                this.reader.start();
 
-            // restart the reader
-            this.reader.start();
-
-            // get a block
-            //System.err.println("Seek: get a block");
-            this.block = this.queue.get(this.id);
-            if(this.block == null) this.eof = true;
+                // get a block
+                //System.err.println("Seek: get a block");
+                this.block = this.blockQueue.getOutput();
+            }
+            // TODO: will this always get a block?
+            if (this.block == null) this.eof = true;
 
             // reset block offset/address
             this.blockOffset = blockOffset;
             this.blockAddress = blockAddress;
-            if(null != this.block) this.block.blockOffset = this.blockOffset;
+            if (null != this.block) this.block.blockOffset = this.blockOffset;
+
         } catch(InterruptedException e) {
             throw new IOException(e);
         }
         //System.err.println("Seeked to pos=" + pos);
     }
 
-    private boolean eof() throws IOException {
+    protected boolean eof() throws IOException {
         if (this.eof) {
             return true;
         }
