@@ -165,18 +165,18 @@ public class BAMFileWriter extends SAMFileWriterImpl {
 
     protected void finish() {
         outputBinaryCodec.close();
-            try {
-                if (bamIndexer != null) {
-                    bamIndexer.finish();
-                    bamIndexer = null;
-                }
-                if (asyncBamIndexer != null) {
-                    asyncBamIndexer.finish();
-                    asyncBamIndexer = null;
-                }
-            } catch (Exception e) {
-                throw new SAMException("Exception writing BAM index file", e);
+        try {
+            if (bamIndexer != null) {
+                bamIndexer.finish();
+                bamIndexer = null;
             }
+            if (asyncBamIndexer != null) {
+                asyncBamIndexer.finish();
+                asyncBamIndexer = null;
+            }
+        } catch (Exception e) {
+            throw new SAMException("Exception writing BAM index file", e);
+        }
     }
 
     /** @return absolute path, or null if this writer does not correspond to a file.  */
