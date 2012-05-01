@@ -28,7 +28,7 @@ import java.util.concurrent.CountDownLatch;
 /**
  * Stores a compressed or uncompressed block of data.
  */
-public class BlockCompressed implements Comparable<BlockCompressed> {
+public class BlockCompressed {
     /**
      * The byte buffer of compressed or uncompressed data.
      */
@@ -55,11 +55,6 @@ public class BlockCompressed implements Comparable<BlockCompressed> {
     public long crc;
 
     /**
-     * The ID of this block, to order it from the input or to the output stream.
-     */
-    public long id = -1;
-
-    /**
      * The block address in the input or output file.
      */
     private long blockAddress = 0;
@@ -68,13 +63,11 @@ public class BlockCompressed implements Comparable<BlockCompressed> {
      * The latch to signal when the block address is ready upon writing this block by the writer.
      */
     private final CountDownLatch blockAddressLatch = new CountDownLatch(1); // is the block address ready?
-
-    // TODO: set these!
-    // Must be set by creater etc.
+    
     /**
-     * The origin id of this block, usually the index into the input/output queues.
+     * The latch to signal when the black has been consumed.
      */
-    public int origin = -1; 
+    private final CountDownLatch consumedLatch = new CountDownLatch(1); // has the block been consumed?
 
     /**
      * The compression level.
@@ -106,64 +99,46 @@ public class BlockCompressed implements Comparable<BlockCompressed> {
             this.blockLength = 0;
         }
         this.blockAddress = 0;
-        this.id = -1;
     }
     
     /**
      * Creates a new block.
-     * @param origin the origin id of this block.
      * @param compressLevel the compression level of this block
      * @param initBlockLength the initial block length.
      */
-    public BlockCompressed(int origin, int compressLevel, boolean initBlockLevel)
+    public BlockCompressed(int compressLevel, boolean initBlockLevel)
     {
         init(initBlockLevel);
-        this.origin = origin;
         this.compress = true;
         this.compressLevel = compressLevel;
     }
     
     /**
      * Creates a new block.
-     * @param origin the origin id of this block.
      * @param compressLevel the compression level of this block
      */
-    public BlockCompressed(int origin, int compressLevel)
+    public BlockCompressed(int compressLevel)
     {
-        this(origin, compressLevel, false);
+        this(compressLevel, false);
     }
 
     /**
      * Creates a new block.
-     * @param origin the origin id of this block.
      * @param initBlockLength the initial block length.
      */
-    public BlockCompressed(int origin, boolean initBlockLevel)
+    public BlockCompressed(boolean initBlockLevel)
     {
         init(initBlockLevel);
-        this.origin = origin;
         this.compress = false;
         this.compressLevel = -1;
     }
 
     /**
      * Creates a new block.
-     * @param origin the origin id of this block.
      */
-    public BlockCompressed(int origin)
+    public BlockCompressed()
     {
-        this(origin, false); 
-    }
-
-    /**
-     * Compares the ID of the given block to this block.
-     * @param o the block to compare.
-     * @return -1, if this.id < o.id, 0 if (this.id == o.id), 1 otherwise.
-     */
-    public int compareTo(BlockCompressed o) {
-        if(this.id < o.id) return -1;
-        else if(this.id == o.id) return 0;
-        else return 1;
+        this(false); 
     }
 
     /**
@@ -189,11 +164,28 @@ public class BlockCompressed implements Comparable<BlockCompressed> {
     }
 
     /**
-     * Compares the block IDs for equality.
-     * @param o the block to compare.
-     * @return true if the IDs are equal, false otherwise.
+     * Waits until this block has been consumed.
      */
-    public boolean equals(BlockCompressed o) {
-        return (0 == this.compareTo(o));
+    public void getConsumed() {
+        try {
+            this.consumedLatch.await();
+        }
+        catch (InterruptedException e) {
+            throw new RuntimeException("BlockCompressed.getConsumed() was interrupted");
+        }
+    }
+
+    /**
+     * Indicates that this block has been consumed.
+     */
+    public void setConsumed() {
+        this.consumedLatch.countDown();
+    }
+
+    /**
+     * Gets the value of the consumed latch.
+     */
+    public long getConsumedCount() {
+        return this.consumedLatch.getCount();
     }
 }

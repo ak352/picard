@@ -54,12 +54,12 @@ public class ParallelBlockCompressedOutputStream
         extends BlockCompressedOutputStream
 {
     private BlockCompressedWriter writer = null;
-    private BlockCompressedBlockingQueue queue = null;
+    private BlockCompressedMultiQueue multiQueue = null;
+    private BlockCompressedQueue blockQueue = null;
     private BlockCompressed block = null;
 
     private File file = null;
 
-    private int id;
     private int compressionLevel;
 
     private void init(int compressionLevel)
@@ -67,11 +67,11 @@ public class ParallelBlockCompressedOutputStream
         int i;
         this.compressionLevel = compressionLevel;
         // get the queue
-        this.queue = BlockCompressedMultiQueue.getInstance();
-        // get the id of this stream
-        this.id = this.queue.register();
+        this.multiQueue = BlockCompressedMultiQueue.getInstance();
+        // get the queue for this stream
+        this.blockQueue = this.multiQueue.register();
         // create the writer
-        this.writer = new BlockCompressedWriter(codec, this.queue, this.id);
+        this.writer = new BlockCompressedWriter(codec, this.blockQueue);
         // start the writer
         this.writer.start();
     }
@@ -146,7 +146,7 @@ public class ParallelBlockCompressedOutputStream
         public void write(final byte[] bytes, int startIndex, int numBytes) throws IOException {
             try {
                 if(null == this.block) {
-                    this.block = new BlockCompressed(this.id, this.compressionLevel, true);
+                    this.block = new BlockCompressed(this.compressionLevel, true);
                 }
 
                 while (numBytes > 0) {
@@ -157,8 +157,8 @@ public class ParallelBlockCompressedOutputStream
                     numBytes -= bytesToWrite;
                     assert(0 <= numBytes);
                     if(this.block.blockLength == this.block.blockOffset) {
-                        this.queue.add(this.block);
-                        this.block = new BlockCompressed(this.id, this.compressionLevel, true);
+                        this.blockQueue.add(this.block);
+                        this.block = new BlockCompressed(this.compressionLevel, true);
                     }
                 }
             } catch(InterruptedException e) {
@@ -171,12 +171,12 @@ public class ParallelBlockCompressedOutputStream
             // add the current block to the queue
             if(null != this.block && 0 < this.block.blockOffset) {
                 this.block.blockLength = this.block.blockOffset;
-                this.queue.add(this.block);
+                this.blockQueue.add(this.block);
             }
             this.block = null;
 
             // wait until the queue is empty
-            this.queue.waitUntilEmpty(this.id);
+            this.blockQueue.waitUntilEmpty();
 
             // wait until the write has finished writing is blocking on a wait
             while(!this.writer.isGetting()) {
@@ -197,18 +197,18 @@ public class ParallelBlockCompressedOutputStream
             this.writer.flush();
 
             // close the queue
-            this.queue.deregister(this.id);
+            this.multiQueue.deregister(this.blockQueue);
             
             // restart 
             if(restart) {
                 // re-register
-                this.id = this.queue.register();
+                this.blockQueue = this.multiQueue.register();
 
                 // new block
-                this.block = new BlockCompressed(this.id, this.compressionLevel, true);
+                this.block = new BlockCompressed(this.compressionLevel, true);
 
                 // reset the writer
-                this.writer.reset(this.id);
+                this.writer.reset(this.blockQueue);
 
                 // start the writer
                 this.writer.start();
