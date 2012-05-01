@@ -31,22 +31,76 @@ import java.util.List;
 import java.util.ArrayList;
 import net.sf.samtools.util.BlockGunzipper;
 
+/**
+ * The main class to compress and decompress blocks.  Unlike a Thread, this class can be 
+ * started and joined multiple times.
+ */
 public class BlockCompressedConsumer {
+    /**
+     * The queue from which to retrieve and put blocks.
+     */
     private BlockCompressedConsumerQueue queue = null;
+
+    /**
+     * The underlying thread to process the blocks.
+     */
     private BlockCompressedConsumerThread consumerThread = null;
+
+    /**
+     * The default time to sleep waiting for blocks.
+     */
     private static final long THREAD_SLEEP = 10; 
     
+    /**
+     * A block for temporary buffer.
+     */
     private BlockCompressed block = null;
+
+    /**
+     * True if the consumer has completed all tasks and will do no more consuming, false otherwise.
+     */
     private boolean isDone;
+
+    /**
+     * The consumer id.
+     */
     private int cid;
+
+    /**
+     * The number of blocks consumed.
+     */
     private long n;
+
+    /**
+     * True to locally buffer blocks into a pool, false otherwise.
+     */
     private boolean usePools = false;
 
+    /**
+     * A deflator with no compresion.
+     */
     private final Deflater noCompressionDeflater = new Deflater(Deflater.NO_COMPRESSION, true);
+
+    /**
+     * The deflators for various compression levels.
+     */
     private List<Deflater> deflaters = new ArrayList<Deflater>();
+
+    /**
+     * The CRC coded checker.
+     */
     private final CRC32 crc32 = new CRC32();
+
+    /**
+     * The decompressor.
+     */
     private final BlockGunzipper blockGunzipper = new BlockGunzipper();
 
+    /**
+     * Creates a new consumer ready to consume.
+     * @param queue the queue from which to retrieve and add blocks.
+     * @param cid the consumer id.
+     */
     public BlockCompressedConsumer(BlockCompressedConsumerQueue queue, int cid)
     {
         int i;
@@ -63,6 +117,7 @@ public class BlockCompressedConsumer {
      * Determines whether or not the inflater will re-calculated the CRC on the decompressed data
      * and check it against the value stored in the GZIP header.  CRC checking is an expensive
      * operation and should be used accordingly.
+     * @param check true to set CRC checking, false otherwise.
      */
     public void setCheckCrcs(final boolean check) {
         this.blockGunzipper.setCheckCrcs(check);
@@ -80,6 +135,11 @@ public class BlockCompressedConsumer {
                 ((buffer[offset+3] & 0xFF) << 24));
     }
 
+    /**
+     * Inflates the block. Stores the previous block length in block.priorLength.
+     * @param block the block to inflate.
+     * @return true if successful, false otherwise.
+     */
     private boolean inflateBlock(BlockCompressed block)
         throws IOException
     {
@@ -106,6 +166,12 @@ public class BlockCompressedConsumer {
         return true;
     }
 
+    /**
+     * Deflates the block. Stores the previous block length in block.priorLength and the CRC is updated.
+     * @param block the block to deflate.
+     * @param deflater the deflater.
+     * @return true if successful, false otherwise.
+     */
     private boolean deflateBlock(BlockCompressed block, Deflater deflater)
     {
         if(0 == block.blockLength) return true; // no bytes to compress
@@ -155,12 +221,18 @@ public class BlockCompressedConsumer {
         return true;
     }
 
+    /**
+     * Starts the underlying consumer thread.
+     */
     public void start() {
         this.consumerThread = new BlockCompressedConsumerThread(this);
         this.consumerThread.setDaemon(true);
         this.consumerThread.start();
     }
 
+    /**
+     * Joins the underlying consumer thread.
+     */
     public void join() {
         try {
             this.consumerThread.join();
@@ -171,13 +243,26 @@ public class BlockCompressedConsumer {
         }
     }
 
+    /**
+     * The underlying consumer thread.
+     */
     protected class BlockCompressedConsumerThread extends Thread {
+        /**
+         * The consumer to which this thread belongs.
+         */
         private BlockCompressedConsumer consumer = null;
 
+        /**
+         * Creates a new consumer thread.
+         * @param consumer the consumer to which this thread belongs.
+         */
         public BlockCompressedConsumerThread(BlockCompressedConsumer consumer) {
             this.consumer = consumer;
         }
 
+        /**
+         * Runs the consumer.
+         */
         public void run()
         {
             BlockCompressed b = null;
@@ -195,14 +280,9 @@ public class BlockCompressedConsumer {
                     if(usePools) {
                         // get block(s)
                         while(poolIn.n < poolIn.m) { // more to read in
-                            b = this.consumer.queue.get((0 == poolIn.n && 0 == poolOut.n)); // NB: only wait if the pools are empty         
-                            if(null == b) {
+                            if(0 < this.consumer.queue.drainTo(poolIn, poolIn.m - poolIn.n, (0 == poolIn.n && 0 == poolOut.n))) {
                                 break;
                             }
-                            if(!poolIn.add(b)) {
-                                throw new Exception("Could not add a block to the input block pool");
-                            }
-                            b = null;
                         }
                         if(0 == poolIn.n && 0 == poolOut.n) { // no more data
                             //break; // EOF
@@ -238,8 +318,7 @@ public class BlockCompressedConsumer {
                             // NB: only wait if the pools are full
                             wait = (poolIn.m == poolIn.n && poolOut.m == poolOut.n) ? true : false;
                             if(!this.consumer.queue.add(b, wait)) {
-                                // ignore
-                                // break; // EOF
+                                break; 
                             }
                             poolOut.get(); // ignore return
                             b = null;
@@ -289,10 +368,16 @@ public class BlockCompressedConsumer {
         }
     }
     
+    /**
+     * Set this consumer thread to be done.
+     */
     public void setDone() {
         this.isDone = true;
     }
 
+    /**
+     * Reset the state of this consumer.
+     */
     public void reset() {
         this.isDone = false;
     }

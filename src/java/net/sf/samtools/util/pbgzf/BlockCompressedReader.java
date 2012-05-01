@@ -37,21 +37,59 @@ import net.sf.samtools.util.BlockCompressedStreamConstants;
 
 import net.sf.samtools.FileTruncatedException;
 
+/**
+ * Reads blocks of data from a file, and adds it to a queue for consumption. Unlike a 
+ * Thread, this class can be started and joined multiple times.
+ *
+ */
 public class BlockCompressedReader {
+    /**
+     * The input stream.
+     */
     private InputStream mStream = null;
+
+    /**
+     * The input file.
+     */
     private SeekableStream mFile = null;
+
+    /**
+     * The underlying reader thread.
+     */
     private BlockCompressedReaderThread readerThread = null;
 
-    // TODO: are these necessary?
-    private int blockOffset = 0;
+    /**
+     * The latest block address read.
+     */
     private long mBlockAddress = 0;
 
+    /**
+     * The queue in which to place blocks.
+     */
     public BlockCompressedBlockingQueue input = null;
+
+    /**
+     * True if the reader has read in all blocks, false otherwise.
+     */
     private boolean isDone = false;
+
+    /**
+     * True if the reader has been closed, false otherwise.
+     */
     public boolean isClosed = false;
 
+    /**
+     * The id of the input stream used to identify blocks in the queue.
+     */
     private int id;
 
+    /**
+     * Creates a new reader.
+     * @param stream the underlying input stream.
+     * @param file the file.
+     * @param input the input queue.
+     * @param id ID of the associated stream registered with the queue.
+     */
     public BlockCompressedReader(final InputStream stream, final SeekableStream file, BlockCompressedBlockingQueue input, int id) {
         this.mStream = stream;
         this.mFile = file;
@@ -101,6 +139,11 @@ public class BlockCompressedReader {
                 ((buffer[offset+1] & 0xFF) << 8));
     }
 
+    /**
+     * Reads a block's worth of data into the block. The block address is set here.
+     * @param block the block in which to place the data.
+     * @return true if successful, false otherwise.
+     */
     private boolean readBlock(BlockCompressed block)
         throws IOException {
 
@@ -141,23 +184,39 @@ public class BlockCompressedReader {
         return true;
     }
 
+    /**
+     * Set the reader state to done.
+     */
     public void setDone() {
         this.isDone = true;
     }
 
+    /**
+     * @return returns true if the reader is done reading.
+     */
     public boolean isDone() {
         return this.isDone;
     }
 
+    /**
+     * Resets the state of the reader.
+     * @param id the id of the associated stream registered with the queue.
+     */
     public void reset(int id) {
         this.isDone = this.isClosed = false;
         this.id = id;
     }
 
+    /**
+     * @return returns the underlying file.
+     */
     public SeekableStream getFile() {
         return mFile;
     }
 
+    /**
+     * Closes this reader.
+     */
     public void close()
         throws IOException {
         if (mFile != null) {
@@ -170,12 +229,18 @@ public class BlockCompressedReader {
         this.input = null;
     }
 
+    /**
+     * Starts the underlying reader thread.
+     */
     public void start() {
         this.readerThread = new BlockCompressedReaderThread(this);
         this.readerThread.setDaemon(true);
         this.readerThread.start();
     }
 
+    /**
+     * Joins the underlying reader thread.
+     */
     public void join() {
         try {
             this.readerThread.join();
@@ -186,13 +251,25 @@ public class BlockCompressedReader {
         }
     }
 
+    /**
+     * The underlying reader thread.
+     */
     protected class BlockCompressedReaderThread extends Thread {
+        /**
+         * The reader associated with this thread.
+         */
         private BlockCompressedReader reader = null;
 
+        /**
+         * @param the reader associated with this thread.
+         */
         public BlockCompressedReaderThread(BlockCompressedReader reader) {
             this.reader = reader;
         }
 
+        /**
+         * Runs the reader.
+         */
         public void run()
         {
             BlockCompressed b = null;

@@ -28,39 +28,85 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
+import java.util.Collection;
 import java.lang.Thread;
 import java.lang.InterruptedException;
 
 import net.sf.samtools.Defaults;
 
-// TODO: bound the queue sizes...
-// TODO: register/deregister collisions if the consumers have a block checked out...
-// add - add to the queue (input queue) 
-// get - remove an element such that there eixsts a spot in the output queue
-// remove - get from the queue (output queue)
-// register - register a new reader/writer
+/**
+ * The multi-stream block queue, to support a fixed number of consumer threads and an arbitrary number of input 
+ * and output streams.  The main idea is to use the Singleton pattern to have only one instance of this queue
+ * globally.  A given IO stream registers with this queue, and has underlying input and outpu queues from which
+ * blocks are added and retrieved.  The consumer threads process blocks in these underlying queues. When an IO
+ * stream is finished, it deregisters from the queue. 
+ *
+ * This queue guarantees that the order in which blocks are added is the same order in which blocks are
+ * returned.  The queue also blocks when specified.
+ */
 public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, BlockCompressedConsumerQueue {
+    /**
+     * The default queue size for each stream's queue.
+     */
     private int QUEUE_SIZE = 100;
+
+    /**
+     * The default number of milliseconds to sleep.
+     */
     private static final long THREAD_SLEEP = 100;
 
+    /**
+     * The instance of this class.
+     */
     private static BlockCompressedMultiQueue instance = null;
 
+    /**
+     * The input queues to the consumers, one per registered stream.
+     */
     private List<BlockCompressedPriorityBlockingQueue> input = null;
+    
+    /**
+     * The output queues from the consumers, one per registered stream.
+     */
     private List<BlockCompressedPriorityBlockingQueue> output = null;
+
+    /**
+     * The number of out-standing blocks possessed by the consumers.
+     */
     private List<Integer> numOutstanding = null;
 
+    /**
+     * The consumer threads for compressing and decompressing blocks.
+     */
     private List<BlockCompressedConsumer> consumers = null;
 
+    /**
+     * The lock on this queue.
+     */
     final private Lock lock = new ReentrantLock();
 
+    /**
+     * The number of consumers.
+     */
     private int numConsumers = 1;
+
+    /**
+     * The index of the last registered stream to yield blocks to a consumer.
+     */
     private int lastI = 0;
     
+    /**
+     * Sleep.
+     */
     private void sleep()
     {
         this.sleep(THREAD_SLEEP);
     }
     
+    /**
+     * Sleep for the given length of time.
+     * @param l the length of time.
+     */
     private void sleep(long l)
     {
         try {
@@ -70,7 +116,9 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         }
     }
 
-    // NB: Singleton pattern
+    /**
+     * Constructor for the Singleton pattern.
+     */
     protected BlockCompressedMultiQueue() {
         int i;
         this.input = new ArrayList<BlockCompressedPriorityBlockingQueue>();
@@ -89,6 +137,9 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         }
     }
 
+    /**
+     * Gets the instance of this queue.
+     */
     public static synchronized BlockCompressedMultiQueue getInstance() {
         if(null == instance) {
             instance = new BlockCompressedMultiQueue();
@@ -96,6 +147,10 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         return instance;
     }
 
+	/**
+	 * Gets the ID of the stream relative to the queue.
+	 * @return the id of this stream in the queue.
+	 */
     public int register() { // register with this queue
         int n = -1;
         this.lock.lock();
@@ -108,6 +163,10 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         return n;
     }
 
+	/**
+	 * Disassociates this stream with the queue.
+	 * @param i the id of this stream returned by register.
+	 */
     public void deregister(int i) {
         // get the associated queues
         this.lock.lock();
@@ -135,7 +194,11 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         this.lock.unlock();
     }
 
-    // consumers
+    /**
+     * Gets a block from the queue, waiting if specified.
+     * @param wait true to wait until a block is available, false otherwise.
+     * @return null if unsuccesful, otherwise a block.
+     */
     public BlockCompressed get(boolean wait) {
         int i, start;
         BlockCompressed block = null;
@@ -172,7 +235,54 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         return block;
     }
 
-    // consumers
+    /**
+     * Gets a collection of blocks from the queue, waiting if specified.
+     * @param c the collection in which to add the blocks.
+     * @param maxElements the maximum number of elements to add.
+     * @param wait true to wait until a block is available, false otherwise.
+     * @return the number of blocks added.
+     */
+    public int drainTo(Collection<BlockCompressed> c, int maxElements, boolean wait)
+    {
+        int i, start, num = 0;
+        start = i = this.lastI;
+        while(true) { // while we have not received any
+            if(0 < this.input.size()) { // do queues exist
+                BlockCompressedPriorityBlockingQueue in = null;
+                // get the input queue
+                try {
+                    in = this.input.get(i);
+                } catch(IndexOutOfBoundsException e) {
+                    // ignore
+                }
+                if(null != in) {
+                    // get items
+                    num = in.drainTo(c, maxElements);
+                    // check success
+                    if(0 < num) {
+                        break; // success!
+                    }
+                }
+                // move to the next queue
+                i++;
+                if(this.input.size() <= i) i = 0;
+            }
+            if(start == i) { // we gone through all of the queues
+                if(!wait) break; // do not wait
+                // give a chance for others to add
+                // TODO: use wait/notifyAll
+                this.sleep();
+            }
+        }
+        this.lastI = i;
+        return num;
+    }
+
+    /**
+     * Adds a block to the queue, waiting if specified.
+     * @param wait true to wait until the block can be added, false otherwise.
+     * @return true if successful, false otherwise.
+     */
     public boolean add(BlockCompressed block, boolean wait) {
         boolean r = false;
         BlockCompressedPriorityBlockingQueue out = null;
@@ -193,7 +303,12 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         return r;
     }
 
-    // reader/writers
+	/**
+	 * Adds a block of data to the queue for compression/decompression. The
+	 * ID of the block will be set here.
+	 * @param block the block to add.
+	 * @return true if successful, false otherwise.
+	 */
     public boolean add(BlockCompressed block) 
         throws InterruptedException
     {
@@ -215,7 +330,11 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         return false;
     }
 
-    // reader/writers
+	/**
+	 * Returns the next block from the queue, in the same order it was added.
+	 * @param i the id of this stream.
+	 * @return the block.
+	 */
     public BlockCompressed get(int i) 
         throws InterruptedException
     {
@@ -235,6 +354,11 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         return null;
     }
 
+	/**
+	 * Waits until the queue for this stream is empty.
+	 * @param i the id of this stream.
+	 * @param l the length of time to sleep if the queue is not empty.
+	 */
     public void waitUntilEmpty(int i, int l) 
         throws InterruptedException
     {
@@ -259,6 +383,10 @@ public class BlockCompressedMultiQueue implements BlockCompressedBlockingQueue, 
         }
     }
     
+	/**
+	 * Waits until the queue for this stream is empty.
+	 * @param i the id of this stream.
+	 */
     public void waitUntilEmpty(int i) 
         throws InterruptedException
     {

@@ -28,12 +28,35 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
+import java.util.Collection;
 import java.lang.Thread;
 import java.lang.InterruptedException;
 
+/**
+ * The interface into the multi-stream block queue for the consumer.
+ */
 public interface BlockCompressedConsumerQueue {
 
+    /**
+     * Gets a block from the queue, waiting if specified.
+     * @param wait true to wait until a block is available, false otherwise.
+     * @return null if unsuccesful, otherwise a block.
+     */
     public BlockCompressed get(boolean wait);
 
+    /**
+     * Adds a block to the queue, waiting if specified.
+     * @param wait true to wait until the block can be added, false otherwise.
+     * @return true if successful, false otherwise.
+     */
     public boolean add(BlockCompressed block, boolean wait);
+
+    /**
+     * Gets a collection of blocks from the queue, waiting if specified.
+     * @param c the collection in which to add the blocks.
+     * @param maxElements the maximum number of elements to add.
+     * @param wait true to wait until a block is available, false otherwise.
+     * @return the number of blocks added.
+     */
+    public int drainTo(Collection<BlockCompressed> c, int maxElements, boolean wait);
 }

@@ -31,21 +31,54 @@ import java.util.concurrent.locks.*;
 import java.lang.Thread;
 import java.lang.InterruptedException;
 
+/**
+ * Interface into the underlying multi-stream blocking queue for the
+ * ParallelBlockCompressedInputStream and ParallelBlockCompressedOutputStream
+ * classes.
+ */
 public interface BlockCompressedBlockingQueue {
 
+	/**
+	 * Gets the ID of the stream relative to the queue.
+	 * @return the id of this stream in the queue.
+	 */
     public int register();
 
+	/**
+	 * Disassociates this stream with the queue.
+	 * @param i the id of this stream returned by register.
+	 */
     public void deregister(int i);
 
+	/**
+	 * Adds a block of data to the queue for compression/decompression. The
+	 * ID of the block will be set here.
+	 * @param block the block to add.
+	 * @return true if successful, false otherwise.
+	 */
     public boolean add(BlockCompressed block) 
         throws InterruptedException;
 
+	/**
+	 * Returns the next block from the queue, in the same order it was added.
+	 * @param i the id of this stream.
+	 * @return the block.
+	 */
     public BlockCompressed get(int i) 
         throws InterruptedException;
 
+	/**
+	 * Waits until the queue for this stream is empty.
+	 * @param i the id of this stream.
+	 * @param l the length of time to sleep if the queue is not empty.
+	 */
     public void waitUntilEmpty(int i, int l) 
         throws InterruptedException;
     
+	/**
+	 * Waits until the queue for this stream is empty.
+	 * @param i the id of this stream.
+	 */
     public void waitUntilEmpty(int i) 
         throws InterruptedException;
 }
