@@ -169,11 +169,19 @@ public class BAMFileWriter extends SAMFileWriterImpl {
             if (bamIndexer != null) {
                 bamIndexer.finish();
                 bamIndexer = null;
+<<<<<<< HEAD
             }
             if (asyncBamIndexer != null) {
                 asyncBamIndexer.finish();
                 asyncBamIndexer = null;
             }
+=======
+            }
+            if (asyncBamIndexer != null) {
+                asyncBamIndexer.finish();
+                asyncBamIndexer = null;
+            }
+>>>>>>> c7bbee4c40d807510bfa7dfa8188bd8ffaa4335b
         } catch (Exception e) {
             throw new SAMException("Exception writing BAM index file", e);
         }
