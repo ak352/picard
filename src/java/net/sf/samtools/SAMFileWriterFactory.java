@@ -162,10 +162,8 @@ public class SAMFileWriterFactory {
             if (this.tmpDir!=null) ret.setTempDirectory(this.tmpDir);
             initializeBAMWriter(ret, header, presorted, createIndex);
 
-
-            if (this.useAsyncIo && (0 == Defaults.NUM_PBGZF_THREADS || Defaults.DISABLE_PBGZF_COMPRESSION)) { // NB: do not use if we have asynchronous wrting already implemented
-                return new AsyncSAMFileWriter(ret, this.asyncOutputBufferSize);
-            } else return ret;
+            if (this.useAsyncIo) return new AsyncSAMFileWriter(ret, this.asyncOutputBufferSize);
+            else return ret;
         }
         catch (IOException ioe) {
             throw new RuntimeIOException("Error opening file: " + outputFile.getAbsolutePath());

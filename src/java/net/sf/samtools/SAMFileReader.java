@@ -25,6 +25,7 @@ package net.sf.samtools;
 
 
 import net.sf.samtools.util.*;
+import net.sf.samtools.util.mt.MultiThreading;
 
 import java.io.*;
 import java.util.Arrays;
@@ -35,6 +36,8 @@ import java.net.URL;
  * Class for reading and querying SAM/BAM files.  Delegates to appropriate concrete implementation.
  */
 public class SAMFileReader implements Iterable<SAMRecord>, Closeable {
+
+    private boolean parallel = MultiThreading.isParallelBamReaderEnabled();
 
     private static ValidationStringency defaultValidationStringency = ValidationStringency.DEFAULT_STRINGENCY;
 
@@ -484,7 +487,10 @@ public class SAMFileReader implements Iterable<SAMRecord>, Closeable {
             // Rely on file extension.
             if (strm.getSource() == null || strm.getSource().toLowerCase().endsWith(".bam")) {
                 mIsBinary = true;
-                mReader = new BAMFileReader(strm, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
+                if (parallel)
+                    mReader = new ParallelBAMFileReader(strm, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
+                else
+                    mReader = new BAMFileReader(strm, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
             } else {
                 throw new SAMFormatException("Unrecognized file format: " + strm);
             }
@@ -508,14 +514,22 @@ public class SAMFileReader implements Iterable<SAMRecord>, Closeable {
                 mIsBinary = true;
                 if (file == null || !file.isFile()) {
                     // Handle case in which file is a named pipe, e.g. /dev/stdin or created by mkfifo
-                    mReader = new BAMFileReader(bufferedStream, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
+                    if (parallel)
+                        mReader = new ParallelBAMFileReader(bufferedStream, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
+                    else
+                        mReader = new BAMFileReader(bufferedStream, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
                 } else {
                     bufferedStream.close();
-                    mReader = new BAMFileReader(file, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
+                    if (parallel)
+                        mReader = new ParallelBAMFileReader(file, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
+                    else
+                        mReader = new BAMFileReader(file, indexFile, eagerDecode, validationStringency, this.samRecordFactory);
                 }
             } else if (BlockCompressedInputStream.isValidFile(bufferedStream)) {
                 mIsBinary = false;
-                mReader = new SAMTextReader(new BlockCompressedInputStream(bufferedStream), validationStringency, this.samRecordFactory);
+                BlockCompressedInputStream bcis =
+                        BlockCompressedStreamFactory.makeBlockCompressedInputStream(bufferedStream);
+                mReader = new SAMTextReader(bcis, validationStringency, this.samRecordFactory);
             } else if (isGzippedSAMFile(bufferedStream)) {
                 mIsBinary = false;
                 mReader = new SAMTextReader(new GZIPInputStream(bufferedStream), validationStringency, this.samRecordFactory);

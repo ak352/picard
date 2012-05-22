@@ -66,8 +66,8 @@ public class BlockCompressedOutputStream
     }
 
     protected final BinaryCodec codec;
-    private final byte[] uncompressedBuffer = new byte[BlockCompressedStreamConstants.DEFAULT_UNCOMPRESSED_BLOCK_SIZE];
-    private int numUncompressedBytes = 0;
+    protected byte[] uncompressedBuffer = new byte[BlockCompressedStreamConstants.DEFAULT_UNCOMPRESSED_BLOCK_SIZE];
+    protected int numUncompressedBytes = 0;
     private final byte[] compressedBuffer =
             new byte[BlockCompressedStreamConstants.MAX_COMPRESSED_BLOCK_SIZE -
                     BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH];
@@ -240,9 +240,9 @@ public class BlockCompressedOutputStream
      * up in the next deflate event.
      * @return size of gzip block that was written.
      */
-    private int deflateBlock() {
+    protected void deflateBlock() {
         if (numUncompressedBytes == 0) {
-            return 0;
+            return;
         }
         int bytesToCompress = numUncompressedBytes;
         // Compress the input
@@ -278,7 +278,6 @@ public class BlockCompressedOutputStream
             numUncompressedBytes -= bytesToCompress;
         }
         mBlockAddress += totalBlockSize;
-        return totalBlockSize;
     }
 
     /**

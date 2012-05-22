@@ -93,6 +93,9 @@ public class BlockGunzipper {
 
             // Decompress
             inflater.setInput(compressedBlock, BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH, deflatedSize);
+            if (uncompressedSize > uncompressedBlock.length) {
+                throw new RuntimeException("Buffer size is too small");
+            }
             final int inflatedBytes = inflater.inflate(uncompressedBlock, 0, uncompressedSize);
             if (inflatedBytes != uncompressedSize) {
                 throw new SAMFormatException("Did not inflate expected amount");

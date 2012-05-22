@@ -45,13 +45,18 @@ import net.sf.samtools.FileTruncatedException;
  * c.f. http://samtools.sourceforge.net/SAM1.pdf for details of BGZF format
  */
 public class BlockCompressedInputStream extends InputStream {
+    // inherited by ParallelBlockCompressedInputStream:
     protected InputStream mStream = null;
     protected SeekableStream mFile = null;
+    protected byte[] mCurrentBlock = null;
+    protected int mCurrentOffset = 0;
+    protected long mBlockAddress = 0;
+    protected int mLastBlockLength = 0;
+    protected int uncompressedBlockLength = 0;
+    // not inherited:
     private byte[] mFileBuffer = null;
-    private byte[] mCurrentBlock = null;
-    private int mCurrentOffset = 0;
-    private long mBlockAddress = 0;
-    private int mLastBlockLength = 0;
+    private boolean lastBlockEmpty = false; // last block read was empty
+    private boolean terminationChecked = false; // only check once
     private final BlockGunzipper blockGunzipper = new BlockGunzipper();
 
     /**
@@ -60,6 +65,7 @@ public class BlockCompressedInputStream extends InputStream {
     public BlockCompressedInputStream(final InputStream stream) {
         mStream = IOUtil.toBufferedStream(stream);
         mFile = null;
+        finish();
     }
 
     /**
@@ -69,12 +75,13 @@ public class BlockCompressedInputStream extends InputStream {
         throws IOException {
         mFile = new SeekableFileStream(file);
         mStream = null;
-
+        finish();
     }
 
     public BlockCompressedInputStream(final URL url) {
         mFile = new SeekableBufferedStream(new SeekableHTTPStream(url));
         mStream = null;
+        finish();
     }
 
     /**
@@ -85,6 +92,58 @@ public class BlockCompressedInputStream extends InputStream {
     public BlockCompressedInputStream(final SeekableStream strm) {
         mFile = strm;
         mStream = null;
+        finish();
+    }
+
+    private void finish() {
+        isSeekable(); // save seekable status
+        checkTermination();
+    }
+
+    // Check termination if this is a seekable stream. */
+    private void checkTermination() {
+        if (!isSeekable()) return; // can't check
+        File file = new File(mFile.getSource());
+        try {
+            if (BlockCompressedInputStream.checkTermination(file) != FileTermination.HAS_TERMINATOR_BLOCK) {
+                System.err.printf("WARNING: BGZF file \"%s\" is not properly terminated!\n",
+                        mFile.getSource());
+            }
+        }
+        catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        terminationChecked = true;
+    }
+
+    /**
+     * Returns true if this stream is truly seekable.
+     * Regular files are seekable, but some special files,
+     * such as /dev/stdin, may not be.  This method performs
+     * a test seek to position 0 to verify that the underlying
+     * SeekableStream is truly seekable.  If this stream is
+     * not backed by a SeekableStream, then false is
+     * always returned. <p> WARNING: Because a test seek is
+     * performed, this method must be called by the
+     * constructor before any operations are performed on
+     * the stream.  Only the first invocation of this method
+     * performs a seek; subsequent calls will simply return
+     * the saved result from the first invocation.
+     */
+    private Boolean isSeekable = null;
+    protected boolean isSeekable() {
+        if (isSeekable != null) return isSeekable;
+        if (mFile == null) return false;
+        File file = new File(mFile.getSource());
+        if (file == null) return false;
+        try {
+            mFile.seek(0);
+            isSeekable = true;
+        }
+        catch (IOException e) {
+            isSeekable = false;
+        }
+        return isSeekable;
     }
 
     /**
@@ -104,13 +163,13 @@ public class BlockCompressedInputStream extends InputStream {
      */
     public int available()
         throws IOException {
-        if (mCurrentBlock == null || mCurrentOffset == mCurrentBlock.length) {
+        if (mCurrentBlock == null || mCurrentOffset == uncompressedBlockLength) {
             readBlock();
         }
         if (mCurrentBlock == null) {
             return 0;
         }
-        return mCurrentBlock.length - mCurrentOffset;
+        return uncompressedBlockLength - mCurrentOffset;
     }
 
     /**
@@ -173,45 +232,45 @@ public class BlockCompressedInputStream extends InputStream {
      * @
      */
     public String readLine() throws IOException {
-    	int available = available();
+        int available = available();
         if (available == 0) {
             return null;
         }
         if(null == buf){ // lazy initialisation 
-        	buf = new ByteArrayOutputStream(8192);
+            buf = new ByteArrayOutputStream(8192);
         }
         buf.reset();
-    	boolean done = false;
-    	boolean foundCr = false; // \r found flag
+        boolean done = false;
+        boolean foundCr = false; // \r found flag
         while (!done) {
-        	int linetmpPos = mCurrentOffset;
-        	int bCnt = 0;
-        	while((available-- > 0)){
-        		final byte c = mCurrentBlock[linetmpPos++];
-        		if(c == eol){ // found \n
-        			done = true;
-        			break;
-        		} else if(foundCr){  // previous char was \r
-        			--linetmpPos; // current char is not \n so put it back
-        			done = true;
-        			break;
-        		} else if(c == eolCr){ // found \r
-					foundCr = true;
-        			continue; // no ++bCnt
-        		}
-				++bCnt;
-        	}
-        	if(mCurrentOffset < linetmpPos){
-				buf.write(mCurrentBlock, mCurrentOffset, bCnt);
-	        	mCurrentOffset = linetmpPos;
-        	}
-        	available = available();    
-        	if(available == 0){
-        		// EOF
-        		done = true;
-        	}
+            int linetmpPos = mCurrentOffset;
+            int bCnt = 0;
+            while((available-- > 0)){
+                final byte c = mCurrentBlock[linetmpPos++];
+                if(c == eol){ // found \n
+                    done = true;
+                    break;
+                } else if(foundCr){  // previous char was \r
+                    --linetmpPos; // current char is not \n so put it back
+                    done = true;
+                    break;
+                } else if(c == eolCr){ // found \r
+                    foundCr = true;
+                    continue; // no ++bCnt
+                }
+                ++bCnt;
+            }
+            if(mCurrentOffset < linetmpPos){
+                buf.write(mCurrentBlock, mCurrentOffset, bCnt);
+                mCurrentOffset = linetmpPos;
+            }
+            available = available();    
+            if(available == 0){
+                // EOF
+                done = true;
+            }
         }
-    	return buf.toString();
+        return buf.toString();
     }
 
     /**
@@ -265,7 +324,7 @@ public class BlockCompressedInputStream extends InputStream {
         final int uncompressedOffset = BlockCompressedFilePointerUtil.getBlockOffset(pos);
         final int available;
         if (mBlockAddress == compressedOffset && mCurrentBlock != null) {
-            available = mCurrentBlock.length;
+            available = uncompressedBlockLength;
         } else {
             mFile.seek(compressedOffset);
             mBlockAddress = compressedOffset;
@@ -273,6 +332,11 @@ public class BlockCompressedInputStream extends InputStream {
             readBlock();
             available = available();
         }
+        // NOTE: (uncompressedOffset == available) should always be an error,
+        // even at EOF, because getFilePointer() never returns a pointer
+        // where (mCurrentOffset == uncompressedBlockLength). So the
+        // following statement could be changed to simply:
+        // "if (uncompressedOffset >= available) ..."
         if (uncompressedOffset > available ||
                 (uncompressedOffset == available && !eof())) {
             throw new IOException("Invalid file pointer: " + pos);
@@ -294,7 +358,7 @@ public class BlockCompressedInputStream extends InputStream {
      * the two.
      */
     public long getFilePointer() {
-        if (mCurrentOffset == mCurrentBlock.length) {
+        if (mCurrentOffset == uncompressedBlockLength) {
             // If current offset is at the end of the current block, file pointer should point
             // to the beginning of the next block.
             return BlockCompressedFilePointerUtil.makeFilePointer(mBlockAddress + mLastBlockLength, 0);
@@ -331,36 +395,43 @@ public class BlockCompressedInputStream extends InputStream {
                 buffer[13] == BlockCompressedStreamConstants.BGZF_ID2);
     }
 
-    private void readBlock()
+    protected void readBlock()
         throws IOException {
 
-        if (mFileBuffer == null) {
-            mFileBuffer = new byte[BlockCompressedStreamConstants.MAX_COMPRESSED_BLOCK_SIZE];
-        }
-        int count = readBytes(mFileBuffer, 0, BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH);
-        if (count == 0) {
-            // Handle case where there is no empty gzip block at end.
+        do {
+            if (mFileBuffer == null) {
+                mFileBuffer = new byte[BlockCompressedStreamConstants.MAX_COMPRESSED_BLOCK_SIZE];
+            }
+            int count = readBytes(mFileBuffer, 0, BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH);
+            if (count == 0) {
+                // Handle EOF
+                mCurrentOffset = 0;
+                mBlockAddress += mLastBlockLength;
+                uncompressedBlockLength = 0;
+                if (!terminationChecked && !lastBlockEmpty) {
+                    System.err.print("WARNING: BGZF stream was not properly terminated before EOF!\n");
+                }
+                terminationChecked = true;
+                return;
+            }
+            if (count != BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH) {
+                throw new IOException("Premature end of file");
+            }
+            final int blockLength = unpackInt16(mFileBuffer, BlockCompressedStreamConstants.BLOCK_LENGTH_OFFSET) + 1;
+            if (blockLength < BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH || blockLength > mFileBuffer.length) {
+                throw new IOException("Unexpected compressed block length: " + blockLength);
+            }
+            final int remaining = blockLength - BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH;
+            count = readBytes(mFileBuffer, BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH, remaining);
+            if (count != remaining) {
+                throw new FileTruncatedException("Premature end of file");
+            }
+            inflateBlock(mFileBuffer, blockLength);
             mCurrentOffset = 0;
             mBlockAddress += mLastBlockLength;
-            mCurrentBlock = new byte[0];
-            return;
-        }
-        if (count != BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH) {
-            throw new IOException("Premature end of file");
-        }
-        final int blockLength = unpackInt16(mFileBuffer, BlockCompressedStreamConstants.BLOCK_LENGTH_OFFSET) + 1;
-        if (blockLength < BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH || blockLength > mFileBuffer.length) {
-            throw new IOException("Unexpected compressed block length: " + blockLength);
-        }
-        final int remaining = blockLength - BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH;
-        count = readBytes(mFileBuffer, BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH, remaining);
-        if (count != remaining) {
-            throw new FileTruncatedException("Premature end of file");
-        }
-        inflateBlock(mFileBuffer, blockLength);
-        mCurrentOffset = 0;
-        mBlockAddress += mLastBlockLength;
-        mLastBlockLength = blockLength;
+            mLastBlockLength = blockLength;
+            lastBlockEmpty = (uncompressedBlockLength == 0);
+        } while (lastBlockEmpty); // ignore empty blocks
     }
 
     private void inflateBlock(final byte[] compressedBlock, final int compressedLength)
@@ -368,7 +439,7 @@ public class BlockCompressedInputStream extends InputStream {
         final int uncompressedLength = unpackInt32(compressedBlock, compressedLength-4);
         byte[] buffer = mCurrentBlock;
         mCurrentBlock = null;
-        if (buffer == null || buffer.length != uncompressedLength) {
+        if (buffer == null || buffer.length < uncompressedLength) {
             try {
                 buffer = new byte[uncompressedLength];
             } catch (NegativeArraySizeException e) {
@@ -377,6 +448,7 @@ public class BlockCompressedInputStream extends InputStream {
         }
         blockGunzipper.unzipBlock(buffer, compressedBlock, compressedLength);
         mCurrentBlock = buffer;
+        uncompressedBlockLength = uncompressedLength;
     }
 
     private int readBytes(final byte[] buffer, final int offset, final int length)
@@ -416,12 +488,12 @@ public class BlockCompressedInputStream extends InputStream {
         return bytesRead;
     }
 
-    private int unpackInt16(final byte[] buffer, final int offset) {
+    protected static int unpackInt16(final byte[] buffer, final int offset) {
         return ((buffer[offset] & 0xFF) |
                 ((buffer[offset+1] & 0xFF) << 8));
     }
 
-    private int unpackInt32(final byte[] buffer, final int offset) {
+    protected static int unpackInt32(final byte[] buffer, final int offset) {
         return ((buffer[offset] & 0xFF) |
                 ((buffer[offset+1] & 0xFF) << 8) |
                 ((buffer[offset+2] & 0xFF) << 16) |

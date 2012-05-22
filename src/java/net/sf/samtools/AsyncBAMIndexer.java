@@ -24,14 +24,14 @@
 package net.sf.samtools;
 
 import net.sf.samtools.util.AbstractAsyncWriter;
-import net.sf.samtools.util.pbgzf.DelayedFilePointer;
+import net.sf.samtools.util.mt.ParallelBlockCompressedOutputStream.DelayedFilePointer;
 import net.sf.samtools.util.BlockCompressedStreamConstants;
 import net.sf.samtools.util.BlockCompressedFilePointerUtil;
 
 /**
  * Asynchronous BAMIndexer that stores records in a queue until
  * their file positions have been determined by the associated
- * AsyncBlockCompressedOutputStream.
+ * ParallelBlockCompressedOutputStream.
  *
  * Exceptions experienced by the writer thread will be thrown back to
  * the caller in subsequent calls to either processAlignment() or finish().
