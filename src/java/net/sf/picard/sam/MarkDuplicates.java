@@ -121,6 +121,7 @@ public class MarkDuplicates extends AbstractDuplicateFindingAlgorithm {
         log.info("Reading input file and constructing read end information.");
         buildSortedReadEndLists();
         reportMemoryStats("After buildSortedReadEndLists");
+        //How are duplicate Indexes generated?
         generateDuplicateIndexes();
         reportMemoryStats("After generateDuplicateIndexes");
         log.info("Marking " + this.numDuplicateIndices + " records as duplicates.");
@@ -130,6 +131,7 @@ public class MarkDuplicates extends AbstractDuplicateFindingAlgorithm {
         final SamHeaderAndIterator headerAndIterator = openInputs();
         final SAMFileHeader header = headerAndIterator.header;
 
+        //Initialise an output SAM file
         final SAMFileHeader outputHeader = header.clone();
         outputHeader.setSortOrder(SAMFileHeader.SortOrder.coordinate);
         for (final String comment : COMMENT) outputHeader.addComment(comment);
@@ -291,6 +293,8 @@ public class MarkDuplicates extends AbstractDuplicateFindingAlgorithm {
     }
 
     /** Print out some quick JVM memory stats. */
+    // Why do we need to print these memory stats? Perhaps it helps debugging cases, where the hash map 
+    // takes a lot of space
     private void reportMemoryStats(final String stage) {
         System.gc();
         final Runtime runtime = Runtime.getRuntime();
@@ -304,9 +308,11 @@ public class MarkDuplicates extends AbstractDuplicateFindingAlgorithm {
      * duplication, caching to disk as necssary to sort them.
      */
     private void buildSortedReadEndLists() {
+        //Good for diagnostics - tells in advance how many data points can be stored in memory
         final int maxInMemory = (int) ((Runtime.getRuntime().maxMemory() * SORTING_COLLECTION_SIZE_RATIO) / ReadEnds.SIZE_OF);
         log.info("Will retain up to " + maxInMemory + " data points before spilling to disk.");
 
+        //ReadEnds is a class that contains sequences and positions of read pairs and their orientation
         this.pairSort = SortingCollection.newInstance(ReadEnds.class,
                                                       new ReadEndsCodec(),
                                                       new ReadEndsComparator(),
@@ -319,17 +325,22 @@ public class MarkDuplicates extends AbstractDuplicateFindingAlgorithm {
                                                       maxInMemory,
                                                       TMP_DIR);
 
-        final SamHeaderAndIterator headerAndIterator = openInputs();
+        final SamHeaderAndIterator headerAndIterator = openInputs();// A list iterator for a list of readers
         final SAMFileHeader header = headerAndIterator.header;
+        //What is the max file handles for read ends map? What are multiple file handles used for?
         final ReadEndsMap tmp = new DiskReadEndsMap(MAX_FILE_HANDLES_FOR_READ_ENDS_MAP);
         long index = 0;
+        //What is a closeable iterator? Is it so that the iterator can be used to close the file stream?
         final CloseableIterator<SAMRecord> iterator = headerAndIterator.iterator;
 
+        //Iterating through all the SAM records
         while (iterator.hasNext()) {
             final SAMRecord rec = iterator.next();
             if (rec.getReadUnmappedFlag()) {
                 if (rec.getReferenceIndex() == -1) {
                     // When we hit the unmapped reads with no coordinate, no reason to continue.
+                    // Why? Can there not be more mapped reads after the unmapped read with no coordinate?
+                    // Does sorting place such reads at the end?
                     break;
                 }
                 // If this read is unmapped but sorted with the mapped reads, just skip it.
@@ -338,16 +349,20 @@ public class MarkDuplicates extends AbstractDuplicateFindingAlgorithm {
                 final ReadEnds fragmentEnd = buildReadEnds(header, index, rec);
                 this.fragSort.add(fragmentEnd);
 
+                // If the read is paired and the mate does not have an unmapped flag
                 if (rec.getReadPairedFlag() && !rec.getMateUnmappedFlag()) {
                     final String key = rec.getAttribute(ReservedTagConstants.READ_GROUP_ID) + ":" + rec.getReadName();
+                    // What is the reference index here?
                     ReadEnds pairedEnds = tmp.remove(rec.getReferenceIndex(), key);
 
                     // See if we've already seen the first end or not
                     if (pairedEnds == null) {
+                        // If first end not seen, build such a read end and add it to tmp read end map
                         pairedEnds = buildReadEnds(header, index, rec);
                         tmp.put(pairedEnds.read2Sequence, key, pairedEnds);
                     }
                     else {
+                        // If the first end has been seen, 
                         final int sequence = fragmentEnd.read1Sequence;
                         final int coordinate = fragmentEnd.read1Coordinate;
 
