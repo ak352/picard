@@ -92,6 +92,7 @@ public abstract class AbstractDuplicateFindingAlgorithm extends CommandLineProgr
      * Very specialized method to rapidly parse a sequence of digits from a String up until the first
      * non-digit character. Does not handle negative numbers.
      */
+    // Is this a joke?
     private final int rapidParseInt(final String input) {
         final int len = input.length();
         int val = 0;
@@ -140,6 +141,8 @@ public abstract class AbstractDuplicateFindingAlgorithm extends CommandLineProgr
 
                 if (lhs.getReadGroup() != rhs.getReadGroup()) continue outer;
                 if (lhs.getTile() != rhs.getTile()) continue outer;
+                // Optical duplicates are those which are close to each other on the tile
+                // Nothing to do with the sequence
                 if (rhs.getX() > lhs.getX() + maxDistance) continue outer;
 
                 if (Math.abs(lhs.getY()  - rhs.getY()) <= maxDistance) {
