@@ -352,7 +352,9 @@ public class MarkDuplicates extends AbstractDuplicateFindingAlgorithm {
                 // If the read is paired and the mate does not have an unmapped flag
                 if (rec.getReadPairedFlag() && !rec.getMateUnmappedFlag()) {
                     final String key = rec.getAttribute(ReservedTagConstants.READ_GROUP_ID) + ":" + rec.getReadName();
-                    // What is the reference index here?
+                    // What is the reference index here? It returns a mate sequence index which must be the same
+                    // as when the key was added to the map (to optimize storage and retrieval)
+                    // rec.getReferenceIndex refers to the index in the sequence dictionary
                     ReadEnds pairedEnds = tmp.remove(rec.getReferenceIndex(), key);
 
                     // See if we've already seen the first end or not
